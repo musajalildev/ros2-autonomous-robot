@@ -17,23 +17,22 @@ while rclpy.ok():
     time_now = node.get_clock().now().nanoseconds
     elapsed_time = (time_now - timestamp) * 1e-9
     if state == 1: 
-        if elapsed_time < 2:
-            vel.twist.linear.x = 0.05
-            vel.twist.angular.z = 0.0
+        if elapsed_time < 30:
+            vel.twist.linear.x = 0.26
+            vel.twist.angular.z = 1.82
         else:
             vel.twist.linear.x = 0.0
             vel.twist.angular.z = 0.0
             state = 2
             timestamp = node.get_clock().now().nanoseconds
     elif state == 2:
-        if elapsed_time < 4:
-            vel.twist.linear.x = 0.0
-            vel.twist.angular.z = 0.2
+        if elapsed_time < 60:
+            vel.twist.linear.x = 0.26
+            vel.twist.angular.z = -1.82
         else:
             vel.twist.linear.x = 0.0
             vel.twist.angular.z = 0.0 
-            state = 1
-            timestamp = node.get_clock().now().nanoseconds
+            break
 
     node.get_logger().info(
         f"\n[State = {state}] Publishing velocities:\n"
