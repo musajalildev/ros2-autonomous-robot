@@ -18,17 +18,17 @@ while rclpy.ok():
     elapsed_time = (time_now - timestamp) * 1e-9
     if state == 1: 
         if elapsed_time < 30:
-            vel.twist.linear.x = 0.26
-            vel.twist.angular.z = 1.2
+            vel.twist.linear.x = 0.1047
+            vel.twist.angular.z = 0.2094
         else:
-            vel.twist.linear.x = 0.0
+            # vel.twist.linear.x = 0.0
             vel.twist.angular.z = 0.0
             state = 2
             timestamp = node.get_clock().now().nanoseconds
     elif state == 2:
         if elapsed_time < 30:
-            vel.twist.linear.x = 0.26
-            vel.twist.angular.z = -1.2
+            vel.twist.linear.x = 0.1047
+            vel.twist.angular.z = -0.2094
         else:
             vel.twist.linear.x = 0.0
             vel.twist.angular.z = 0.0 
