@@ -9,11 +9,13 @@
   <maintainer email="nhlwin1@sheffield.ac.uk">Naing Htoo Lwin</maintainer>
   <maintainer email="yymaung1@sheffield.ac.uk">Ye Yint Maung</maintainer>
   <maintainer email="majalil1@sheffield.ac.uk">Musa Abdul Jalil</maintainer>
-  <maintainer email="your.name.2@sheffield.ac.uk">Edward Mason</maintainer>
+  <maintainer email="ecmason2@sheffield.ac.uk">Edward Mason</maintainer>
 
   <license>TODO: License declaration</license>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
