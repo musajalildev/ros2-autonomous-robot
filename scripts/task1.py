@@ -118,6 +118,13 @@ class Task1(Node):
                 self.vel_msg.twist.angular.z = 0.0
 
         self.vel_pub.publish(self.vel_msg)
+    
+    def wrap_to_pi(self, angle):
+        while angle > pi:
+            angle -= 2*pi
+        while angle < -pi:
+            angle += 2*pi
+        return angle
 
     def log_callback(self):
         if not self.first_message:
@@ -125,7 +132,7 @@ class Task1(Node):
 
         x_rel = self.x - self.x0
         y_rel = self.y - self.y0
-        theta_rel = self.theta_z - self.theta0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
 
         self.get_logger().info(
             f"x={x_rel:.2f} [m], "
