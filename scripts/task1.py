@@ -7,7 +7,7 @@ from rclpy.signals import SignalHandlerOptions
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 
-from math import pi, atan2, degrees, sin, cos 
+from math import pi, atan2, degrees 
 
 class Task1(Node):
 
@@ -25,11 +25,6 @@ class Task1(Node):
         self.angle_travelled = 0.0
 
         self.x0 = 0.0; self.y0 = 0.0; self.theta0 = 0
-
-        self.cx = None
-        self.cy = None
-        self.phi_ref = 0.0
-        self.phi_travelled = 0.0
 
         # Publisher
         self.vel_pub = self.create_publisher(
@@ -86,57 +81,136 @@ class Task1(Node):
                 self.theta0 = self.theta_z
 
     def timer_callback(self):
-        radius = 0.5
-        linear_velocity = 0.1047
-        angular_velocity = linear_velocity / radius
+        if not self.first_message:
+            return
 
-        # Initialise the first circle centre once we have odom
-        if self.cx is None:
-            # loop 1 is CCW
-            self.set_circle_center(clockwise=False, radius=radius)
+        radius = 0.5 # meters
+        linear_velocity = 0.1047 # meters per second [m/s]
+        angular_velocity = linear_velocity / radius # radians per second [rad/s]
+        
+        angle_change = self.theta_z - self.theta_zref
 
-        # Track progress around the circle using position angle about centre
-        phi = atan2(self.y - self.cy, self.x - self.cx)
-        dphi = self.wrap_to_pi(phi - self.phi_ref)
-        self.phi_travelled += abs(dphi)
-        self.phi_ref = phi
+        if angle_change > pi:
+            angle_change -= 2 * pi
+        elif angle_change < -pi:
+            angle_change += 2 * pi
+
+        self.angle_travelled += abs(angle_change)
+        self.theta_zref = self.theta_z
 
         if self.loop == 1:
-            # CCW
-            self.vel_msg.twist.linear.x = linear_velocity
-            self.vel_msg.twist.angular.z = +angular_velocity
-
-            if self.phi_travelled >= 2 * pi:
+            # First loop: anticlockwise
+            if self.angle_travelled < 2 * pi:
+                self.vel_msg.twist.linear.x = linear_velocity
+                self.vel_msg.twist.angular.z = angular_velocity
+            else:
                 self.loop = 2
-                # recompute centre for the second circle (CW) from the CURRENT pose
-                self.set_circle_center(clockwise=True, radius=radius)
+                self.angle_travelled = 0.0
 
         elif self.loop == 2:
-            # CW
-            self.vel_msg.twist.linear.x = linear_velocity
-            self.vel_msg.twist.angular.z = -angular_velocity
-
-            if self.phi_travelled >= 2 * pi:
+            # Second loop: clockwise
+            if self.angle_travelled < 2 * pi:
+                self.vel_msg.twist.linear.x = linear_velocity
+                self.vel_msg.twist.angular.z = -angular_velocity
+            else:
+                # Finished figure-of-eight
                 self.vel_msg.twist.linear.x = 0.0
                 self.vel_msg.twist.angular.z = 0.0
 
         self.vel_pub.publish(self.vel_msg)
     
-    def wrap_to_pi(self, a: float) -> float:
-        # robust wrap
-        return atan2(sin(a), cos(a))
+    def wrap_to_pi(self, angle):
+        while angle > pi:
+            angle -= 2*pi
+        while angle < -pi:
+            angle += 2*pi
+        return angle
 
-    def set_circle_center(self, clockwise: bool, radius: float):
-        # compute center from current pose
-        if clockwise:
-            self.cx = self.x + radius * sin(self.theta_z)
-            self.cy = self.y - radius * cos(self.theta_z)
-        else:
-            self.cx = self.x - radius * sin(self.theta_z)
-            self.cy = self.y + radius * cos(self.theta_z)
+    def log_callback(self):
+        if not self.first_message:
+            return
 
-        self.phi_ref = atan2(self.y - self.cy, self.x - self.cx)
-        self.phi_travelled = 0.0
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )def log_callback(self):
+        if not self.first_message:
+            return
+
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )def log_callback(self):
+        if not self.first_message:
+            return
+
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )def log_callback(self):
+        if not self.first_message:
+            return
+
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )def log_callback(self):
+        if not self.first_message:
+            return
+
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )def log_callback(self):
+        if not self.first_message:
+            return
+
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )def log_callback(self):
+        if not self.first_message:
+            return
+
+        x_rel = self.x - self.x0
+        y_rel = self.y - self.y0
+        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+
+        self.get_logger().info(
+            f"x={x_rel:.2f} [m], "
+            f"y={y_rel:.2f} [m], "
+            f"yaw={degrees(theta_rel):.1f} [degrees]."
+        )
         
 def main(args=None):
     rclpy.init(args=args)
