@@ -1,210 +1,207 @@
 #!/usr/bin/env python3
+"""
+Task 1: Figure-of-Eight Motion Profile
+COM2009 Assignment #2
+
+Hybrid control:
+  - Yaw accumulation detects when the robot has rotated ~300 degrees
+    (i.e. it's on the final approach back to the start)
+  - Then switches to distance-from-start to stop precisely at the
+    crossover point, giving accurate loop centre and stop position.
+
+Arena layout:
+  - Robot starts at crossover point facing +x direction
+  - Red beacon is 0.5m to the LEFT  (Loop 1, anti-clockwise)
+  - Blue beacon is 0.5m to the RIGHT (Loop 2, clockwise)
+"""
 
 import rclpy
 from rclpy.node import Node
-from rclpy.signals import SignalHandlerOptions
-
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 
-from math import pi, atan2, degrees
+import math
+from tf_transformations import euler_from_quaternion
 
-class Task1(Node):
+
+class Task1Node(Node):
 
     def __init__(self):
-        super().__init__("velocity_control")
+        super().__init__('velocity_control')
 
-        self.first_message = False
-        self.shutdown = False
-        self.loop = 1 # 1 = first circle, 2 = second circle
-
-        self.vel_msg = TwistStamped()
-
-        self.x = 0.0; self.y = 0.0; self.theta_z = 0.0
-        self.theta_zref = 0.0
-        self.angle_travelled = 0.0
-
-        self.x0 = 0.0; self.y0 = 0.0; self.theta0 = 0
-
-        # Publisher
-        self.vel_pub = self.create_publisher(
-            msg_type=TwistStamped,
-            topic="cmd_vel",
-            qos_profile=10,
+        qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=10
         )
-
-        # Subscriber
+        self.cmd_pub = self.create_publisher(TwistStamped, '/cmd_vel', qos)
         self.odom_sub = self.create_subscription(
-            msg_type=Odometry,
-            topic="odom",
-            callback=self.odom_callback,
-            qos_profile=10,
+            Odometry, '/odom', self.odom_callback, 10)
+
+        # Odometry state
+        self.odom_received = False
+        self.initial_x = 0.0
+        self.initial_y = 0.0
+        self.initial_yaw = 0.0
+        self.current_x = 0.0
+        self.current_y = 0.0
+        self.current_yaw = 0.0
+
+        # Motion parameters
+        self.radius = 0.5
+        self.linear_speed = 0.26   # m/s
+        self.angular_speed = self.linear_speed / self.radius  # 0.52 rad/s
+
+        # Yaw tracking
+        self.yaw_accumulated = 0.0
+        self.prev_yaw = 0.0
+
+        # After this much rotation, switch from yaw-mode to
+        # distance-from-start mode for precise stopping
+        self.approach_rad = math.radians(300)  # 300° — on final approach
+        self.return_threshold = 0.06           # stop within 6 cm of start
+
+        # Phase:
+        # 'init' → 'loop1_yaw' → 'loop1_home'
+        #        → 'loop2_yaw' → 'loop2_home'
+        #        → 'done'
+        self.phase = 'init'
+
+        self.create_timer(0.1, self.control_callback)
+        self.create_timer(1.0, self.log_callback)
+
+        self.get_logger().info('Task 1 node started. Waiting for first odometry message...')
+
+    # ── Odometry ─────────────────────────────────────────────────────────────
+
+    def odom_callback(self, msg: Odometry):
+        pos = msg.pose.pose.position
+        ori = msg.pose.pose.orientation
+        _, _, yaw = euler_from_quaternion([ori.x, ori.y, ori.z, ori.w])
+
+        if not self.odom_received:
+            self.initial_x = pos.x
+            self.initial_y = pos.y
+            self.initial_yaw = yaw
+            self.prev_yaw = yaw
+            self.odom_received = True
+            self.get_logger().info('Initial odometry captured. Starting motion...')
+
+        self.current_x = pos.x
+        self.current_y = pos.y
+        self.current_yaw = yaw
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _relative_pose(self):
+        dx = self.current_x - self.initial_x
+        dy = self.current_y - self.initial_y
+        dyaw_rad = math.atan2(
+            math.sin(self.current_yaw - self.initial_yaw),
+            math.cos(self.current_yaw - self.initial_yaw)
         )
+        return dx, dy, math.degrees(dyaw_rad)
 
-        self.control_timer = self.create_timer(
-            timer_period_sec=0.1, # 10Hz control loop
-            callback=self.timer_callback,
-        )
+    def _distance_from_start(self):
+        dx = self.current_x - self.initial_x
+        dy = self.current_y - self.initial_y
+        return math.sqrt(dx * dx + dy * dy)
 
-        self.log_timer = self.create_timer(
-            timer_period_sec=1.0, # 1Hz logging
-            callback=self.log_callback,
-        )
+    def _update_yaw_accumulator(self, direction: float):
+        delta = self.current_yaw - self.prev_yaw
+        delta = math.atan2(math.sin(delta), math.cos(delta))
+        self.yaw_accumulated += direction * delta
+        self.prev_yaw = self.current_yaw
+        return self.yaw_accumulated
 
-    def quaternion_to_euler(self, orientation):
-        x = orientation.x
-        y = orientation.y
-        z = orientation.z
-        w = orientation.w
+    def _start_loop(self, loop_name: str):
+        self.yaw_accumulated = 0.0
+        self.prev_yaw = self.current_yaw
+        self.get_logger().info(f'Starting {loop_name}...')
 
-        yaw = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-        return yaw # in radians
-
-    def on_shutdown(self):
-        self.get_logger().info("Stopping the robot...")
-        self.vel_pub.publish(TwistStamped())
-        self.shutdown = True
-
-    def odom_callback(self, msg_data: Odometry):
-            pose = msg_data.pose.pose
-
-            yaw = self.quaternion_to_euler(pose.orientation)
-
-            self.x = pose.position.x
-            self.y = pose.position.y
-            self.theta_z = yaw
-
-            if not self.first_message:
-                self.first_message = True
-                self.x0 = self.x
-                self.y0 = self.y
-                self.theta0 = self.theta_z
-
-    def timer_callback(self):
-        if not self.first_message:
-            return
-
-        radius = 0.5 # meters
-        linear_velocity = 0.1047 # meters per second [m/s]
-        angular_velocity = linear_velocity / radius # radians per second [rad/s]
-        
-        angle_change = self.theta_z - self.theta_zref
-
-        if angle_change > pi:
-            angle_change -= 2 * pi
-        elif angle_change < -pi:
-            angle_change += 2 * pi
-
-        self.angle_travelled += abs(angle_change)
-        self.theta_zref = self.theta_z
-
-        if self.loop == 1:
-            # First loop: anticlockwise
-            if self.angle_travelled < 2 * pi:
-                self.vel_msg.twist.linear.x = linear_velocity
-                self.vel_msg.twist.angular.z = angular_velocity
-            else:
-                self.loop = 2
-                self.angle_travelled = 0.0
-
-        elif self.loop == 2:
-            # Second loop: clockwise
-            if self.angle_travelled < 2 * pi:
-                self.vel_msg.twist.linear.x = linear_velocity
-                self.vel_msg.twist.angular.z = -angular_velocity
-            else:
-                # Finished figure-of-eight
-                self.vel_msg.twist.linear.x = 0.0
-                self.vel_msg.twist.angular.z = 0.0
-
-        self.vel_pub.publish(self.vel_msg)
-    
-    def wrap_to_pi(self, angle):
-        while angle > pi:
-            angle -= 2*pi
-        while angle < -pi:
-            angle += 2*pi
-        return angle
+    # ── 1 Hz logger ──────────────────────────────────────────────────────────
 
     def log_callback(self):
-        if not self.first_message:
+        if not self.odom_received:
+            return
+        x, y, yaw = self._relative_pose()
+        self.get_logger().info(
+            f'x={x:.2f} [m], y={y:.2f} [m], yaw={yaw:.1f} [degrees].'
+        )
+
+    # ── 10 Hz control loop ────────────────────────────────────────────────────
+
+    def control_callback(self):
+        if not self.odom_received:
             return
 
-        x_rel = self.x - self.x0
-        y_rel = self.y - self.y0
-        theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
+        if self.phase == 'init':
+            self.phase = 'loop1_yaw'
+            self._start_loop('Loop 1 (anti-clockwise)')
 
-        self.get_logger().info(
-            f"x={x_rel:.2f} [m], "
-            f"y={y_rel:.2f} [m], "
-            f"yaw={degrees(theta_rel):.1f} [degrees]."
-        )
-        
+        elif self.phase == 'loop1_yaw':
+            # Drive anti-clockwise until 300° rotated
+            rotated = self._update_yaw_accumulator(direction=+1.0)
+            self._publish_velocity(self.linear_speed, +self.angular_speed)
+            if rotated >= self.approach_rad:
+                self.phase = 'loop1_home'
+                self.get_logger().info('Loop 1 final approach...')
+
+        elif self.phase == 'loop1_home':
+            # Keep driving but stop as soon as we're back near the start
+            self._update_yaw_accumulator(direction=+1.0)
+            if self._distance_from_start() > self.return_threshold:
+                self._publish_velocity(self.linear_speed, +self.angular_speed)
+            else:
+                self._publish_velocity(0.0, 0.0)
+                self.phase = 'loop2_yaw'
+                self._start_loop('Loop 2 (clockwise)')
+
+        elif self.phase == 'loop2_yaw':
+            # Drive clockwise until 300° rotated
+            rotated = self._update_yaw_accumulator(direction=-1.0)
+            self._publish_velocity(self.linear_speed, -self.angular_speed)
+            if rotated >= self.approach_rad:
+                self.phase = 'loop2_home'
+                self.get_logger().info('Loop 2 final approach...')
+
+        elif self.phase == 'loop2_home':
+            # Keep driving but stop as soon as we're back near the start
+            self._update_yaw_accumulator(direction=-1.0)
+            if self._distance_from_start() > self.return_threshold:
+                self._publish_velocity(self.linear_speed, -self.angular_speed)
+            else:
+                self._publish_velocity(0.0, 0.0)
+                self.phase = 'done'
+                self.get_logger().info('Figure-of-eight complete. Robot stopped.')
+
+        elif self.phase == 'done':
+            self._publish_velocity(0.0, 0.0)
+
+    # ── Publisher ─────────────────────────────────────────────────────────────
+
+    def _publish_velocity(self, linear: float, angular: float):
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.twist.linear.x = linear
+        msg.twist.angular.z = angular
+        self.cmd_pub.publish(msg)
+
+
 def main(args=None):
-    rclpy.init(
-        args=args,
-        signal_handler_options=SignalHandlerOptions.NO
-        )
-    node = Task1()
+    rclpy.init(args=args)
+    node = Task1Node()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
-    finally:
-        node.on_shutdown()
-        while not node.shutdown:
-            continue
-        node.destroy_node()
-        rclpy.shutdown()
+        pass
+    stop_msg = TwistStamped()
+    stop_msg.header.stamp = node.get_clock().now().to_msg()
+    node.cmd_pub.publish(stop_msg)
+    node.destroy_node()
+    rclpy.shutdown()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
-
-
-# state = 1
-# vel = TwistStamped()
-
-# rclpy.init(args=None)
-# node = rclpy.create_node("basic_velocity_control")
-# vel_pub = node.create_publisher(TwistStamped, "cmd_vel", 10)
-
-# timestamp = node.get_clock().now().nanoseconds
-
-# while rclpy.ok():
-#     time_now = node.get_clock().now().nanoseconds
-#     elapsed_time = (time_now - timestamp) * 1e-9
-#     if state == 1: 
-#         if elapsed_time < 30:
-#             vel.twist.linear.x = 0.1047
-#             vel.twist.angular.z = 0.2094
-#         else:
-#             # vel.twist.linear.x = 0.0
-#             vel.twist.angular.z = 0.0
-#             state = 2
-#             timestamp = node.get_clock().now().nanoseconds
-#     elif state == 2:
-#         if elapsed_time < 30:
-#             vel.twist.linear.x = 0.1047
-#             vel.twist.angular.z = -0.2094
-#         else:
-#             vel.twist.linear.x = 0.0
-#             vel.twist.angular.z = 0.0 
-#             break
-
-#     node.get_logger().info(
-#         f"\n[State = {state}] Publishing velocities:\n"
-#         f"  - linear.x: {vel.twist.linear.x:.2f} [m/s]\n"
-#         f"  - angular.z: {vel.twist.angular.z:.2f} [rad/s].",
-#         throttle_duration_sec=1,
-#     )
-#     vel_pub.publish(vel)
-    
-#     try:
-#         rclpy.spin_once(node, timeout_sec=0.1)
-#         time.sleep(0.1) # 10Hz loop rate
-#     except KeyboardInterrupt:
-#         print("Ctrl+C detected. Shutting down.")
-#         break
-
-# node.destroy_node()
-    
