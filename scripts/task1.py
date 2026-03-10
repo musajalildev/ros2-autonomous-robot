@@ -88,7 +88,7 @@ class Task1(Node):
             return
 
         radius = 0.5
-        linear_velocity = 0.1047
+        linear_velocity = 0.12
         angular_velocity = linear_velocity / radius
 
         # Initialise the first circle centre once we have odom
@@ -135,6 +135,7 @@ class Task1(Node):
         theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
 
         self.get_logger().info(
+            f"{self.loop}: phi_travelled {self.phi_travelled}"
             f"x={x_rel:.2f} [m], "
             f"y={y_rel:.2f} [m], "
             f"yaw={degrees(theta_rel):.1f} [degrees]."
