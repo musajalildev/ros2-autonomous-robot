@@ -37,7 +37,7 @@ class Task1(Node):
         self.phi_ref = 0.0
         self.phi_travelled = 0.0
         
-        self.start_tolerance = 0.05 # [m] how close to start pose to consider "starting"
+        self.start_tolerance = 0.07 # [m] how close to start pose to consider "starting"
 
         # Publisher
         self.vel_pub = self.create_publisher(
@@ -88,7 +88,7 @@ class Task1(Node):
             return
 
         radius = 0.5
-        linear_velocity = 0.12
+        linear_velocity = 0.11
         angular_velocity = linear_velocity / radius
 
         # Initialise the first circle centre once we have odom
