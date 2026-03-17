@@ -41,7 +41,7 @@ class MapExplorer(Node):
         self.recover_counter = 0
 
         # Tunable parameters
-        self.forward_speed = 0.14
+        self.forward_speed = 0.23
         self.slow_speed = 0.06
         self.turn_speed = 0.9
         self.recover_turn_speed = 1.2
