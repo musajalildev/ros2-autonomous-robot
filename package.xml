@@ -2,31 +2,24 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>com2009_team09_2026</name>
-  <version>0.0.0</version>
-  
-  <description>TODO: Package description</description>
-  
+  <version>0.0.1</version>
+  <description>COM2009 Team 09 - Task 2: Obstacle Avoidance and Arena Exploration</description>
+
   <maintainer email="nhlwin1@sheffield.ac.uk">Naing Htoo Lwin</maintainer>
   <maintainer email="yymaung1@sheffield.ac.uk">Ye Yint Maung</maintainer>
   <maintainer email="majalil1@sheffield.ac.uk">Musa Abdul Jalil</maintainer>
   <maintainer email="ecmason2@sheffield.ac.uk">Edward Mason</maintainer>
 
-  <license>TODO: License declaration</license>
-
-  <exec_depend>rclpy</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <depend>rclcpp</depend>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>        ← only line added
 
   <export>
     <build_type>ament_cmake</build_type>
   </export>
-
 </package>
