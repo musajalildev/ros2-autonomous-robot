@@ -135,7 +135,6 @@ class Task1(Node):
         theta_rel = self.wrap_to_pi(self.theta_z - self.theta0)
 
         self.get_logger().info(
-            f"{self.loop}: phi_travelled {self.phi_travelled}"
             f"x={x_rel:.2f} [m], "
             f"y={y_rel:.2f} [m], "
             f"yaw={degrees(theta_rel):.1f} [degrees]."

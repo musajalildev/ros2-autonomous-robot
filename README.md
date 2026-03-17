@@ -13,6 +13,11 @@ source ~/.bashrc
 ros2 launch com2009_team09_2026 taskX.launch.py
 ```
 
+## Drive the robot with Keyboard
+```
+ros2 run turtlebot3_teleop teleop_keyboard
+```
+
 > [!NOTE]
 > Run all these commands from `~/ros2_ws`
 
