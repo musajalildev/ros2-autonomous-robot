@@ -23,8 +23,8 @@ ament_python_install_package(${PROJECT_NAME}_modules)
 install(PROGRAMS
   scripts/task1.py
   scripts/stop_me.py
-  scripts/obstacle_detection.py
-  scripts/explore_map.py
+  scripts/task2_obstacle_detection.py
+  scripts/task2_explore_map.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
