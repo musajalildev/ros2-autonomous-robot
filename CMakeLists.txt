@@ -25,6 +25,7 @@ install(PROGRAMS
   scripts/stop_me.py
   scripts/task2_obstacle_detection.py
   scripts/task2_explore_map.py
+  scripts/task3_explorer.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
