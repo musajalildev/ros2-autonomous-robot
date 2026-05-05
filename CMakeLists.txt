@@ -23,6 +23,10 @@ ament_python_install_package(${PROJECT_NAME}_modules)
 install(PROGRAMS
   scripts/task1.py
   scripts/stop_me.py
+  scripts/obstacle_detection.py
+  scripts/explore_map.py
+  scripts/task3_map_saver.py
+  scripts/task3_beacon.py
   scripts/task2_obstacle_detection.py
   scripts/task2_explore_map.py
   scripts/task3_explorer.py
@@ -31,7 +35,14 @@ install(PROGRAMS
 
 install(DIRECTORY
   launch
+  maps        
+  snaps
   DESTINATION share/${PROJECT_NAME}
+)
+find_package(nav2_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ObstacleInfo.msg"
 )
 
 find_package(rosidl_default_generators REQUIRED)
