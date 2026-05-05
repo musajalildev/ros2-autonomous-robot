@@ -6,8 +6,9 @@ from rclpy.signals import SignalHandlerOptions
 
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
+from com2009_team09_2026_modules.tb3_tools import quaternion_to_euler
 
-from math import pi, atan2, degrees 
+from math import pi, atan2, sin, cos, degrees, sqrt
 
 class Task1(Node):
 
@@ -20,11 +21,23 @@ class Task1(Node):
 
         self.vel_msg = TwistStamped()
 
-        self.x = 0.0; self.y = 0.0; self.theta_z = 0.0
-        self.theta_zref = 0.0
-        self.angle_travelled = 0.0
+        # Current pose from odom
+        self.x = 0.0
+        self.y = 0.0
+        self.theta_z = 0.0
 
-        self.x0 = 0.0; self.y0 = 0.0; self.theta0 = 0
+        # Start pose
+        self.x0 = 0.0
+        self.y0 = 0.0
+        self.theta0 = 0.0
+
+        # Circle tracking
+        self.cx = None
+        self.cy = None
+        self.phi_ref = 0.0
+        self.phi_travelled = 0.0
+        
+        self.start_tolerance = 0.07 # [m] how close to start pose to consider "starting"
 
         # Publisher
         self.vel_pub = self.create_publisher(
@@ -51,15 +64,6 @@ class Task1(Node):
             callback=self.log_callback,
         )
 
-    def quaternion_to_euler(self, orientation):
-        x = orientation.x
-        y = orientation.y
-        z = orientation.z
-        w = orientation.w
-
-        yaw = atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-        return yaw # in radians
-
     def on_shutdown(self):
         self.get_logger().info("Stopping the robot...")
         self.vel_pub.publish(TwistStamped())
@@ -67,8 +71,7 @@ class Task1(Node):
 
     def odom_callback(self, msg_data: Odometry):
             pose = msg_data.pose.pose
-
-            yaw = self.quaternion_to_euler(pose.orientation)
+            _, _, yaw = quaternion_to_euler(pose.orientation)
 
             self.x = pose.position.x
             self.y = pose.position.y
@@ -84,47 +87,44 @@ class Task1(Node):
         if not self.first_message:
             return
 
-        radius = 0.5 # meters
-        linear_velocity = 0.1047 # meters per second [m/s]
-        angular_velocity = linear_velocity / radius # radians per second [rad/s]
-        
-        angle_change = self.theta_z - self.theta_zref
+        radius = 0.5
+        linear_velocity = 0.11
+        angular_velocity = linear_velocity / radius
 
-        if angle_change > pi:
-            angle_change -= 2 * pi
-        elif angle_change < -pi:
-            angle_change += 2 * pi
+        # Initialise the first circle centre once we have odom
+        if self.cx is None:
+            self.set_circle_center(clockwise=False, radius=radius)
 
-        self.angle_travelled += abs(angle_change)
-        self.theta_zref = self.theta_z
+        # Track progress around the circle using position angle about centre
+        phi = atan2(self.y - self.cy, self.x - self.cx)
+        dphi = self.wrap_to_pi(phi - self.phi_ref)
+        self.phi_travelled += abs(dphi)
+        self.phi_ref = phi
+
+        # Distance from start point
+        dx0 = self.x - self.x0
+        dy0 = self.y - self.y0
+        distance_to_start = sqrt(dx0**2 + dy0**2)
 
         if self.loop == 1:
-            # First loop: anticlockwise
-            if self.angle_travelled < 2 * pi:
-                self.vel_msg.twist.linear.x = linear_velocity
-                self.vel_msg.twist.angular.z = angular_velocity
-            else:
+            # First loop: Anti-clockwise
+            self.vel_msg.twist.linear.x = linear_velocity
+            self.vel_msg.twist.angular.z = +angular_velocity
+
+            if self.phi_travelled >= 1.5 * pi and distance_to_start < self.start_tolerance:
                 self.loop = 2
-                self.angle_travelled = 0.0
+                self.set_circle_center(clockwise=True, radius=radius)
 
         elif self.loop == 2:
-            # Second loop: clockwise
-            if self.angle_travelled < 2 * pi:
-                self.vel_msg.twist.linear.x = linear_velocity
-                self.vel_msg.twist.angular.z = -angular_velocity
-            else:
-                # Finished figure-of-eight
+            # Second loop: Clockwise
+            self.vel_msg.twist.linear.x = linear_velocity
+            self.vel_msg.twist.angular.z = -angular_velocity
+
+            if self.phi_travelled >= 1.5 * pi and distance_to_start < self.start_tolerance:
                 self.vel_msg.twist.linear.x = 0.0
                 self.vel_msg.twist.angular.z = 0.0
 
         self.vel_pub.publish(self.vel_msg)
-    
-    def wrap_to_pi(self, angle):
-        while angle > pi:
-            angle -= 2*pi
-        while angle < -pi:
-            angle += 2*pi
-        return angle
 
     def log_callback(self):
         if not self.first_message:
@@ -211,9 +211,27 @@ class Task1(Node):
             f"y={y_rel:.2f} [m], "
             f"yaw={degrees(theta_rel):.1f} [degrees]."
         )
+    
+    def wrap_to_pi(self, angle: float) -> float:
+        return atan2(sin(angle), cos(angle))
+
+    def set_circle_center(self, clockwise: bool, radius: float):
+        # compute center from current pose
+        if clockwise:
+            self.cx = self.x + radius * sin(self.theta_z)
+            self.cy = self.y - radius * cos(self.theta_z)
+        else:
+            self.cx = self.x - radius * sin(self.theta_z)
+            self.cy = self.y + radius * cos(self.theta_z)
+
+        self.phi_ref = atan2(self.y - self.cy, self.x - self.cx)
+        self.phi_travelled = 0.0
         
 def main(args=None):
-    rclpy.init(args=args)
+    rclpy.init(
+        args=args,
+        signal_handler_options=SignalHandlerOptions.NO,
+    )
     node = Task1()
     try:
         rclpy.spin(node)
@@ -228,52 +246,3 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-
-
-# state = 1
-# vel = TwistStamped()
-
-# rclpy.init(args=None)
-# node = rclpy.create_node("basic_velocity_control")
-# vel_pub = node.create_publisher(TwistStamped, "cmd_vel", 10)
-
-# timestamp = node.get_clock().now().nanoseconds
-
-# while rclpy.ok():
-#     time_now = node.get_clock().now().nanoseconds
-#     elapsed_time = (time_now - timestamp) * 1e-9
-#     if state == 1: 
-#         if elapsed_time < 30:
-#             vel.twist.linear.x = 0.1047
-#             vel.twist.angular.z = 0.2094
-#         else:
-#             # vel.twist.linear.x = 0.0
-#             vel.twist.angular.z = 0.0
-#             state = 2
-#             timestamp = node.get_clock().now().nanoseconds
-#     elif state == 2:
-#         if elapsed_time < 30:
-#             vel.twist.linear.x = 0.1047
-#             vel.twist.angular.z = -0.2094
-#         else:
-#             vel.twist.linear.x = 0.0
-#             vel.twist.angular.z = 0.0 
-#             break
-
-#     node.get_logger().info(
-#         f"\n[State = {state}] Publishing velocities:\n"
-#         f"  - linear.x: {vel.twist.linear.x:.2f} [m/s]\n"
-#         f"  - angular.z: {vel.twist.angular.z:.2f} [rad/s].",
-#         throttle_duration_sec=1,
-#     )
-#     vel_pub.publish(vel)
-    
-#     try:
-#         rclpy.spin_once(node, timeout_sec=0.1)
-#         time.sleep(0.1) # 10Hz loop rate
-#     except KeyboardInterrupt:
-#         print("Ctrl+C detected. Shutting down.")
-#         break
-
-# node.destroy_node()
-    
