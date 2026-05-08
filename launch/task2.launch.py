@@ -5,12 +5,12 @@ def generate_launch_description():
     return LaunchDescription([ 
         Node( 
             package='com2009_team09_2026', 
-            executable='obstacle_detection.py', 
+            executable='task2_obstacle_detection.py', 
             name='obstacle_detection' 
         ),
         Node(
             package='com2009_team09_2026', 
-            executable='explore_map.py', 
+            executable='task2_explore_map.py', 
             name='map_explorer'
              
         )

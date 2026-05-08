@@ -28,12 +28,17 @@ ros2 run turtlebot3_teleop teleop_keyboard
 ros2 launch turtlebot3_gazebo empty_world.launch.py
 ```
 
-### Task1: Figure of Eight
+### Task1: Velocity Control
 ```
 ros2 launch tuos_task_sims fig_of_eight.launch.py
 ```
 
-### Task2: Obstacle Avoidance
+### Task2: Avoiding Obstacles
 ```
 ros2 launch tuos_task_sims obstacle_avoidance.launch.py
+```
+
+### Task3: Exploration & Search
+```
+ros2 launch tuos_task_sims explore.launch.py
 ```
