@@ -38,18 +38,19 @@ def generate_launch_description():
             )
         ),
 
-        # Obstacle detector
+        # Explorer (drives robot + obstacle avoidance + zone tracking)
         Node(
             package='com2009_team09_2026',
-            executable='obstacle_detection.py',
-            name='obstacle_detection'
+            executable='task3_explorer.py',
+            name='task3_explorer',
+            output='screen'
         ),
 
         # Beacon search (prints target colour log message)
         Node(
             package='com2009_team09_2026',
             executable='task3_beacon.py',
-            name='beacon_search',
+            name='task3_beacon',
             parameters=[{
                 'target_colour': LaunchConfiguration('target_beacon')
             }]
@@ -59,7 +60,8 @@ def generate_launch_description():
         Node(
             package='com2009_team09_2026',
             executable='task3_map_saver.py',
-            name='task3_map_saver'
+            name='task3_map_saver',
+            output='screen',
         ),
 
     ])
