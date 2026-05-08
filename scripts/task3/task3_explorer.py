@@ -8,6 +8,7 @@ from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from com2009_team09_2026_modules.tb3_tools import quaternion_to_euler
+from com2009_team09_2026.msg import ObstacleInfo
 
 import numpy as np
 import random
@@ -267,7 +268,7 @@ class Explorer(Node):
             return
 
         # STATE: AVOID
-        if front < FRONT_CLEAR_THRESHOLD:
+        if obstacle_detected or front < FRONT_CLEAR_THRESHOLD:
             self.state = "AVOID"
             self.blocked_counter += 1
 

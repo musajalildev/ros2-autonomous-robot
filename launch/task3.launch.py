@@ -46,6 +46,13 @@ def generate_launch_description():
             output='screen'
         ),
 
+        Node(
+            package='com2009_team09_2026',
+            executable='task3_obstacle_detection.py',
+            name='task3_obstacle_detection',
+            output='screen'
+        ),
+
         # Beacon search (prints target colour log message)
         Node(
             package='com2009_team09_2026',
