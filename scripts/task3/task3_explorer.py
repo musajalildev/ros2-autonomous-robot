@@ -201,6 +201,8 @@ class Explorer(Node):
     # MAIN CONTROL LOOP - 10 Hz
 
     def timer_callback(self):
+        if self.shutdown:
+            return
         if not self.have_scan or not self.have_odom:
             return
 
@@ -334,8 +336,12 @@ class Explorer(Node):
 
     def on_shutdown(self):
         self.get_logger().info("Explorer node shutting down - stopping robot.")
-        self.vel_pub.publish(TwistStamped())
+        stop_msg = TwistStamped()
         self.shutdown = True
+        for _ in range(10):
+            self.vel_pub.publish(stop_msg)
+            time.sleep(0.05)
+        
 
 
 def main(args=None):
@@ -350,8 +356,8 @@ def main(args=None):
         print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
     finally:
         node.on_shutdown()
-        while not node.shutdown:
-            continue
+        # while not node.shutdown:
+        #     continue
         node.destroy_node()
         rclpy.shutdown()
 
