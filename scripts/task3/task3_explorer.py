@@ -118,7 +118,7 @@ class Explorer(Node):
 
     def _update_frontier_bias(self):
         self.frontier_timer += 1
-        if self.frontier_timer < 20:
+        if self.frontier_timer < 50:
             return
         self.frontier_timer = 0
 
@@ -279,9 +279,9 @@ class Explorer(Node):
             while angle_error < -pi:
                 angle_error += 2 * pi
 
-            
-            if abs(angle_error) < 1.5 and front > FRONT_CLEAR_THRESHOLD:
-                angular_z = max(min(0.6 * angle_error, 0.5), -0.5)
+            # KEY FIX: only use frontier bias if direction is actually clear
+            if abs(angle_error) < 1.0 and front > FRONT_CLEAR_THRESHOLD:
+                angular_z = max(min(0.4 * angle_error, 0.3), -0.3)
             else:
                 # Frontier is blocked — use open side bias instead
                 error = left - right
