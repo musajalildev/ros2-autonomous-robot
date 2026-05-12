@@ -106,7 +106,7 @@ class BeaconSearch(Node):
       # Save the RAW image (no filtering applied)
       cv2.imwrite(SNAP_PATH, cv_image)
 
-      if not self.beacon_saved:
+      if not self.saved:
         self.saved = True
         self.get_logger().info(
             f"BEACON CAPTURED: {self.colour} beacon saved to {SNAP_PATH}"
