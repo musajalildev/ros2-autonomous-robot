@@ -108,7 +108,7 @@ class Explorer(Node):
             callback=self.scan_callback,
             qos_profile=10,
         )
-        self.object_sub = self.create_subscription(
+        self.obstacle_sub = self.create_subscription(
             msg_type=ObstacleInfo,
             topic="/obstacle_info",
             callback=self.obstacle_callback,
@@ -197,6 +197,10 @@ class Explorer(Node):
             self.prev_y = self.y
             self.start_zone = self._current_zone()
             self.visited_zones.add(self.start_zone)
+    
+    def obstacle_callback(self, msg: ObstacleInfo):
+        self.latest_obstacle = msg
+        self.have_obstacle_info = True
 
     def scan_callback(self, msg: LaserScan):
         self.have_scan = True
