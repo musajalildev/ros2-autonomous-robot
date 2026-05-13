@@ -8,6 +8,7 @@ from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from com2009_team09_2026_modules.tb3_tools import quaternion_to_euler
+from com2009_team09_2026.msg import ObstacleInfo
 
 import numpy as np
 import random
@@ -68,6 +69,11 @@ class Explorer(Node):
         self.left_distance = 999.0
         self.right_distance = 999.0
 
+        # Obstacle Info
+        self.obstacle_detected = False
+        self.object_type = "unkown"
+        self.have_obstacle_msg = False
+
         # Progress tracking
         self.prev_x = 0.0
         self.prev_y = 0.0
@@ -100,6 +106,12 @@ class Explorer(Node):
             msg_type=LaserScan,
             topic="scan",
             callback=self.scan_callback,
+            qos_profile=10,
+        )
+        self.obstacle_sub = self.create_subscription(
+            msg_type=ObstacleInfo,
+            topic="/obstacle_info",
+            callback=self.obstacle_callback,
             qos_profile=10,
         )
 
@@ -185,6 +197,10 @@ class Explorer(Node):
             self.prev_y = self.y
             self.start_zone = self._current_zone()
             self.visited_zones.add(self.start_zone)
+    
+    def obstacle_callback(self, msg: ObstacleInfo):
+        self.latest_obstacle = msg
+        self.have_obstacle_info = True
 
     def scan_callback(self, msg: LaserScan):
         self.have_scan = True
@@ -267,9 +283,14 @@ class Explorer(Node):
                 self.prev_x = self.x
                 self.prev_y = self.y
             return
+        
+        avoid_triggered = (
+            self.obstacle_detected if self.have_obstacle_msg
+            else front < FRONT_CLEAR_THRESHOLD
+        )
 
         # STATE: AVOID
-        if front < FRONT_CLEAR_THRESHOLD:
+        if avoid_triggered or front < FRONT_CLEAR_THRESHOLD:
             self.state = "AVOID"
             self.blocked_counter += 1
 
@@ -328,6 +349,7 @@ class Explorer(Node):
             f"x={self.x:.2f} y={self.y:.2f} yaw={degrees(self.theta_z):.1f} deg | "
             f"Front={self.front_distance:.2f} Left={self.left_distance:.2f} "
             f"Right={self.right_distance:.2f} | "
+            f"ObstDetected={self.obstacle_detected} Type={self.object_type}"
             f"Blocked={self.blocked_counter} NoProgress={self.no_progress_count} "
             f"Recoveries={self.total_recoveries}"
         )

@@ -27,6 +27,7 @@ install(PROGRAMS
   scripts/task3/task3_beacon.py
   scripts/task3/task3_explorer.py
   scripts/task3/task3_map_saver.py
+  scripts/task3/task3_obstacle_detection.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
