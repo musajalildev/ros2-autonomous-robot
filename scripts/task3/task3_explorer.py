@@ -224,7 +224,7 @@ class Explorer(Node):
 
         self.last_turn_left = left >= right
 
-        # ── BACKUP ────────────────────────────────────────────────────────
+        # BACKUP
         if self.state == "BACKUP":
             self.set_cmd(BACKUP_SPEED, 0.0)
             self.backup_counter -= 1
@@ -240,7 +240,7 @@ class Explorer(Node):
                 self.prev_x, self.prev_y = self.x, self.y
             return
 
-        # ── RECOVER ───────────────────────────────────────────────────────
+        # RECOVER 
         if self.state == "RECOVER":
             self.set_cmd(0.0, TURN_SPEED * self.recover_dir)
             self.recover_counter -= 1
@@ -250,7 +250,7 @@ class Explorer(Node):
                 self.goal_y = None
             return
 
-        # ── Stuck check ───────────────────────────────────────────────────
+        #  Stuck check 
         self._check_stuck()
         if self.stuck_count >= 3:
             if back > BACK_CLEAR:
@@ -265,7 +265,7 @@ class Explorer(Node):
             self.goal_x      = None
             return
 
-        # ── Goal timeout ──────────────────────────────────────────────────
+        #  Goal timeout 
         if self.goal_x is not None:
             self.goal_age += 1
             if self.goal_age > GOAL_TIMEOUT:
@@ -277,14 +277,14 @@ class Explorer(Node):
                 self.goal_y = None
                 self.state  = "FIND_GOAL"
 
-        # ── FIND_GOAL ─────────────────────────────────────────────────────
+        # FIND_GOAL 
         if self.state == "FIND_GOAL" or self.goal_x is None:
             if self.have_map and self._find_goal():
                 self.state = "GOTO_GOAL"
             else:
                 self.state = "WANDER"
 
-        # ── AVOID ─────────────────────────────────────────────────────────
+        # AVOID
         if front < FRONT_CLEAR:
             self.blocked_counter += 1
             if self.blocked_counter > 20:
@@ -301,7 +301,7 @@ class Explorer(Node):
 
         self.blocked_counter = 0
 
-        # ── GOTO_GOAL ─────────────────────────────────────────────────────
+        # GOTO_GOAL 
         if self.state == "GOTO_GOAL" and self.goal_x is not None:
             dx   = self.goal_x - self.x
             dy   = self.goal_y - self.y
@@ -331,7 +331,7 @@ class Explorer(Node):
                 self.set_cmd(FORWARD_SPEED, w)
             return
 
-        # ── WANDER ────────────────────────────────────────────────────────
+        # WANDER 
         if left < SIDE_CLOSE:
             self.set_cmd(FORWARD_SPEED, -0.4)
         elif right < SIDE_CLOSE:
