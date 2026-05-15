@@ -30,9 +30,9 @@ FRONT_VERY_CLOSE = 0.25
 SIDE_CLOSE       = 0.20
 BACK_CLEAR       = 0.25
 
-GOAL_REACHED     = 0.40
-GOAL_TIMEOUT     = 150
-TOTAL_TIME       = 360.0
+GOAL_REACHED  = 0.40
+GOAL_TIMEOUT  = 150
+TOTAL_TIME    = 360.0
 
 
 class Explorer(Node):
@@ -55,12 +55,13 @@ class Explorer(Node):
         self.map_res      = 0.05
         self.map_origin_x = self.map_origin_y = 0.0
 
-        self.goal_x       = None
-        self.goal_y       = None
-        self.goal_age     = 0
-        self.goal_blacklist = []  # blacklist timed-out goals
+        self.goal_x         = None
+        self.goal_y         = None
+        self.goal_age       = 0
+        self.goal_blacklist = []
 
-        self.visited_zones = set()
+        self.visited_zones   = set()
+        self.quadrant_visits = {0: 0, 1: 0, 2: 0, 3: 0}
 
         self.front_distance = 999.0
         self.left_distance  = 999.0
@@ -68,8 +69,8 @@ class Explorer(Node):
         self.back_distance  = 999.0
 
         self.prev_x = self.prev_y = 0.0
-        self.stuck_count   = 0
-        self.stuck_timer   = 0
+        self.stuck_count = 0
+        self.stuck_timer = 0
 
         self.state           = "FIND_GOAL"
         self.blocked_counter = 0
@@ -89,7 +90,7 @@ class Explorer(Node):
 
         self.control_timer = self.create_timer(0.1, self.timer_callback)
         self.log_timer     = self.create_timer(2.0, self.log_callback)
-        self.get_logger().info("Task3: Frontier explorer with blacklist started.")
+        self.get_logger().info("Task3: Frontier explorer with quadrant bias + trap escape.")
 
     def set_cmd(self, v, w):
         self.vel_msg.twist.linear.x  = v
@@ -112,6 +113,11 @@ class Explorer(Node):
         if z not in self.visited_zones:
             self.visited_zones.add(z)
             self.get_logger().info(f"ZONE {z} total={len(self.visited_zones)}")
+        # Track quadrant from actual robot position
+        qx = 0 if self.x < self.x0 else 1
+        qy = 0 if self.y < self.y0 else 1
+        q  = qx + qy * 2
+        self.quadrant_visits[q] = self.quadrant_visits.get(q, 0) + 1
 
     def _find_goal(self):
         if self.map_data is None:
@@ -123,6 +129,11 @@ class Explorer(Node):
         rx = int((self.x - self.map_origin_x) / self.map_res)
         ry = int((self.y - self.map_origin_y) / self.map_res)
 
+        # Bias toward least visited quadrant
+        least_q      = min(self.quadrant_visits, key=self.quadrant_visits.get)
+        prefer_neg_x = (least_q % 2 == 0)
+        prefer_neg_y = (least_q < 2)
+
         frontiers = []
         step = 3
         for gy in range(step, self.map_height - step, step):
@@ -133,30 +144,31 @@ class Explorer(Node):
                 if -1 not in patch:
                     continue
                 dist = sqrt((gx-rx)**2 + (gy-ry)**2)
-                if dist < 4:  # ignore frontiers too close
+                if dist < 4:
                     continue
 
                 wx = gx * self.map_res + self.map_origin_x
                 wy = gy * self.map_res + self.map_origin_y
 
-                # Skip blacklisted locations
-                blacklisted = False
-                for bx, by in self.goal_blacklist:
-                    if sqrt((wx-bx)**2 + (wy-by)**2) < 0.5:
-                        blacklisted = True
-                        break
+                blacklisted = any(
+                    sqrt((wx-bx)**2 + (wy-by)**2) < 0.5
+                    for bx, by in self.goal_blacklist)
                 if blacklisted:
                     continue
 
-                frontiers.append((dist, gx, gy, wx, wy))
+                # Strong bonus for least visited quadrant
+                in_preferred = (
+                    (wx < self.x0) == prefer_neg_x and
+                    (wy < self.y0) == prefer_neg_y)
+                score = dist + (200.0 if in_preferred else 0.0)
+
+                frontiers.append((score, gx, gy, wx, wy))
 
         if not frontiers:
-            # Clear blacklist and try again
             self.goal_blacklist = []
             self.get_logger().info("No frontiers — blacklist cleared")
             return False
 
-        # Pick from farthest 30%
         frontiers.sort(reverse=True)
         pool = frontiers[:max(1, len(frontiers)//3)]
         _, bx, by, wx, wy = random.choice(pool)
@@ -165,8 +177,9 @@ class Explorer(Node):
         self.goal_y   = wy
         self.goal_age = 0
         self.get_logger().info(
-            f"NEW GOAL: ({self.goal_x:.2f}, {self.goal_y:.2f}) "
-            f"blacklist={len(self.goal_blacklist)}")
+            f"NEW GOAL: ({self.goal_x:.2f},{self.goal_y:.2f}) "
+            f"least_q={least_q} qv={dict(self.quadrant_visits)} "
+            f"bl={len(self.goal_blacklist)}")
         return True
 
     def odom_callback(self, msg):
@@ -255,7 +268,7 @@ class Explorer(Node):
         if self.stuck_count >= 3:
             if back > BACK_CLEAR:
                 self.state          = "BACKUP"
-                self.backup_counter = 15
+                self.backup_counter = 25
             else:
                 self.state           = "RECOVER"
                 self.recover_counter = 20 + random.randint(0, 20)
@@ -287,6 +300,17 @@ class Explorer(Node):
         # ── AVOID ─────────────────────────────────────────────────────────
         if front < FRONT_CLEAR:
             self.blocked_counter += 1
+
+            # Trapped too long — force backup to exit room
+            if self.blocked_counter > 40:
+                self.get_logger().info("TRAPPED — forcing backup escape")
+                self.blocked_counter = 0
+                self.goal_x          = None
+                self.goal_y          = None
+                self.state           = "BACKUP"
+                self.backup_counter  = 25
+                return
+
             if self.blocked_counter > 20:
                 self.last_turn_left  = not self.last_turn_left
                 self.blocked_counter = 0
@@ -350,12 +374,14 @@ class Explorer(Node):
         z = self._zone()
         g = (f"({self.goal_x:.1f},{self.goal_y:.1f})"
              if self.goal_x is not None else "None")
+        least_q = min(self.quadrant_visits, key=self.quadrant_visits.get)
         self.get_logger().info(
             f"t={t:.0f}s | {self.state} | zone={z} "
             f"vis={len(self.visited_zones)} | goal={g} age={self.goal_age} | "
             f"F={self.front_distance:.2f} L={self.left_distance:.2f} "
             f"R={self.right_distance:.2f} | rec={self.recoveries} "
-            f"stuck={self.stuck_count} bl={len(self.goal_blacklist)}")
+            f"stuck={self.stuck_count} bl={len(self.goal_blacklist)} "
+            f"least_q={least_q} qv={dict(self.quadrant_visits)}")
 
     def on_shutdown(self):
         self.get_logger().info("Explorer shutting down.")
