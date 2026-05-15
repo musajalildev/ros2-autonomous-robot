@@ -17,17 +17,20 @@ import time
 FRONT_ARC = list(range(0, 26)) + list(range(335, 360))
 LEFT_ARC  = list(range(26, 91))
 RIGHT_ARC = list(range(270, 335))
+BACK_ARC  = list(range(150, 211))
 
 MIN_VALID_RANGE = 0.12
 
-FORWARD_SPEED      = 0.23
-SLOW_SPEED         = 0.06
+FORWARD_SPEED      = 0.26
+SLOW_SPEED         = 0.08
 TURN_SPEED         = 0.9
 RECOVER_TURN_SPEED = 1.2
+BACKUP_SPEED       = -0.15
 
 FRONT_CLEAR_THRESHOLD      = 0.43
 FRONT_VERY_CLOSE_THRESHOLD = 0.30
 SIDE_CLOSE_THRESHOLD       = 0.18
+BACK_CLEAR_THRESHOLD       = 0.25
 
 ZONE_SIZE  = 1.0
 TOTAL_TIME = 179.0
@@ -63,6 +66,7 @@ class Explorer(Node):
         self.front_distance = 999.0
         self.left_distance  = 999.0
         self.right_distance = 999.0
+        self.back_distance  = 999.0
 
         self.prev_x               = 0.0
         self.prev_y               = 0.0
@@ -75,6 +79,7 @@ class Explorer(Node):
         self.recover_counter   = 0
         self.recover_direction = 1
         self.total_recoveries  = 0
+        self.backup_counter    = 0
 
         self.vel_pub = self.create_publisher(TwistStamped, "cmd_vel", 10)
 
@@ -118,7 +123,7 @@ class Explorer(Node):
 
     def _update_frontier_bias(self):
         self.frontier_timer += 1
-        if self.frontier_timer < 50:
+        if self.frontier_timer < 20:
             return
         self.frontier_timer = 0
 
@@ -131,9 +136,7 @@ class Explorer(Node):
         rx = int((self.x - self.map_origin_x) / self.map_res)
         ry = int((self.y - self.map_origin_y) / self.map_res)
 
-        best_dist = float('inf')
-        best_gx = best_gy = None
-
+        frontiers = []
         step = 4
         for gy in range(step, self.map_height - step, step):
             for gx in range(step, self.map_width - step, step):
@@ -143,14 +146,19 @@ class Explorer(Node):
                 if -1 not in neighbours:
                     continue
                 dist = sqrt((gx - rx)**2 + (gy - ry)**2)
-                if 8 < dist < best_dist:
-                    best_dist = dist
-                    best_gx, best_gy = gx, gy
+                if dist > 8:
+                    frontiers.append((dist, gx, gy))
 
-        if best_gx is not None:
-            world_x = best_gx * self.map_res + self.map_origin_x
-            world_y = best_gy * self.map_res + self.map_origin_y
-            self.frontier_angle = atan2(world_y - self.y, world_x - self.x)
+        if not frontiers:
+            return
+
+        frontiers.sort(key=lambda f: f[0], reverse=True)
+        top_far = frontiers[:max(1, len(frontiers) // 3)]
+        _, bx, by = random.choice(top_far)
+
+        world_x = bx * self.map_res + self.map_origin_x
+        world_y = by * self.map_res + self.map_origin_y
+        self.frontier_angle = atan2(world_y - self.y, world_x - self.x)
 
     def odom_callback(self, msg: Odometry):
         pose = msg.pose.pose
@@ -170,6 +178,7 @@ class Explorer(Node):
         self.front_distance = float(np.min(self.filter_ranges(r, FRONT_ARC)))
         self.left_distance  = float(np.min(self.filter_ranges(r, LEFT_ARC)))
         self.right_distance = float(np.min(self.filter_ranges(r, RIGHT_ARC)))
+        self.back_distance  = float(np.min(self.filter_ranges(r, BACK_ARC)))
 
     def map_callback(self, msg: OccupancyGrid):
         self.have_map     = True
@@ -208,27 +217,44 @@ class Explorer(Node):
         if self.have_map:
             self._update_frontier_bias()
 
-        if self.state != "RECOVER":
+        if self.state not in ("RECOVER", "BACKUP"):
             self.update_progress_check()
 
         front = self.front_distance
         left  = self.left_distance
         right = self.right_distance
+        back  = self.back_distance
 
         self.last_turn_left = left >= right
 
         # Recovery trigger
-        if self.state != "RECOVER" and self.no_progress_count >= 3:
-            self.state = "RECOVER"
-            self.total_recoveries += 1
-            self.recover_counter = 15
-
-            if self.total_recoveries % 3 == 0:
-                self.recover_direction = random.choice([1, -1])
+        if self.state not in ("RECOVER", "BACKUP") and self.no_progress_count >= 3:
+            if back > BACK_CLEAR_THRESHOLD:
+                self.state = "BACKUP"
+                self.backup_counter = 10
             else:
-                self.recover_direction = 1 if left > right else -1
-
+                self.state = "RECOVER"
+                self.total_recoveries += 1
+                self.recover_counter = 20
+                if self.total_recoveries % 3 == 0:
+                    self.recover_direction = random.choice([1, -1])
+                else:
+                    self.recover_direction = 1 if left > right else -1
             self.no_progress_count = 0
+
+        # STATE: BACKUP
+        if self.state == "BACKUP":
+            self.set_cmd(BACKUP_SPEED, 0.0)
+            self.backup_counter -= 1
+            if self.backup_counter <= 0:
+                self.state = "RECOVER"
+                self.total_recoveries += 1
+                self.recover_counter = 20
+                self.recover_direction = 1 if left > right else -1
+                self.no_progress_count = 0
+                self.progress_timer_count = 0
+                self.prev_x, self.prev_y = self.x, self.y
+            return
 
         # STATE: RECOVER
         if self.state == "RECOVER":
@@ -279,11 +305,16 @@ class Explorer(Node):
             while angle_error < -pi:
                 angle_error += 2 * pi
 
-            # KEY FIX: only use frontier bias if direction is actually clear
-            if abs(angle_error) < 1.0 and front > FRONT_CLEAR_THRESHOLD:
-                angular_z = max(min(0.4 * angle_error, 0.3), -0.3)
+            if front > FRONT_CLEAR_THRESHOLD:
+                if abs(angle_error) > 0.5:
+                    # Large angle error: slow down and turn more aggressively
+                    angular_z = max(min(1.0 * angle_error, 0.8), -0.8)
+                    self.set_cmd(SLOW_SPEED, angular_z)
+                    return
+                else:
+                    # Small angle error: move forward with gentle correction
+                    angular_z = max(min(0.6 * angle_error, 0.4), -0.4)
             else:
-                # Frontier is blocked — use open side bias instead
                 error = left - right
                 angular_z = max(min(0.35 * error, 0.25), -0.25)
         else:
@@ -331,4 +362,3 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-EOF
