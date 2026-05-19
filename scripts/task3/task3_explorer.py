@@ -32,7 +32,7 @@ BACK_CLEAR       = 0.25
 
 GOAL_REACHED     = 0.40
 GOAL_TIMEOUT     = 150
-TOTAL_TIME       = 360.0
+TOTAL_TIME       = 180.0
 
 
 class Explorer(Node):
