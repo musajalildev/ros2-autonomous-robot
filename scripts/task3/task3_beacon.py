@@ -15,17 +15,17 @@ SNAP_PATH = os.path.expanduser(
 )
 
 COLOUR_RANGES = {
-    'yellow': ([20,  80,  80], [35, 255, 255]),
-    'green':  ([36,  40,  40], [89, 255, 255]),
-    'blue':   ([90,  40,  40], [130, 255, 255]),
-    'red':    ([0,  150, 150], [10, 255, 255]),
+    'yellow': ([18,  60,  60], [38, 255, 255]),
+    'green':  ([36,  30,  30], [89, 255, 255]),
+    'blue':   ([85,  30,  30], [135, 255, 255]),
+    'red':    ([0,  100, 100], [10, 255, 255]),
 }
 
-RED_UPPER = ([165, 150, 150], [180, 255, 255])
+RED_UPPER = ([165, 100, 100], [180, 255, 255])
 
-MIN_CONTOUR_AREA = 2000
+MIN_CONTOUR_AREA = 500
 LOCK_WIDTH_FRAC  = 0.25
-EDGE_MARGIN      = 30  # pixels from edge — beacon must not touch edges
+EDGE_MARGIN      = 10  # pixels from edge — beacon must not touch edges
 
 
 class BeaconSearch(Node):
@@ -53,7 +53,7 @@ class BeaconSearch(Node):
 
         self.image_sub = self.create_subscription(
             Image,
-            'camera/image_raw',
+            'camera/color/image_raw',
             self.image_callback,
             10
         )
@@ -174,8 +174,8 @@ def main(args=None):
         print(f"Exception: {e}")
     finally:
         node.on_shutdown()
-        while not node.shutdown:
-            continue
+        #while not node.shutdown:
+        #    continue
         node.destroy_node()
         rclpy.shutdown()
 

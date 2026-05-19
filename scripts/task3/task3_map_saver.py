@@ -97,8 +97,8 @@ def main(args=None):
         print(f"{node.get_name()} received shutdown")
     finally:
         node.on_shutdown()
-        while not node.shutdown:
-            continue
+        # while not node.shutdown:
+        #     continue
         node.destroy_node()
         rclpy.shutdown()
 

@@ -25,9 +25,9 @@ SLOW_SPEED       = 0.10
 TURN_SPEED       = 1.0
 BACKUP_SPEED     = -0.15
 
-FRONT_CLEAR      = 0.45
-FRONT_VERY_CLOSE = 0.25
-SIDE_CLOSE       = 0.20
+FRONT_CLEAR      = 0.43
+FRONT_VERY_CLOSE = 0.30
+SIDE_CLOSE       = 0.18
 BACK_CLEAR       = 0.25
 
 GOAL_REACHED     = 0.40
@@ -364,16 +364,19 @@ class Explorer(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    rclpy.init(
+        args=args,
+        signal_handler_options=SignalHandlerOptions.NO,
+    )
     node = Explorer()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print(f"{node.get_name()} received Ctrl+C.")
+        print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
     finally:
         node.on_shutdown()
-        while not node.shutdown:
-            continue
+        # while not node.shutdown:
+        #     continue
         node.destroy_node()
         rclpy.shutdown()
 
