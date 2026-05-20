@@ -2,7 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.signals import SignalHandlerOptions
+# from rclpy.signals import SignalHandlerOptions
 
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry, OccupancyGrid
@@ -363,20 +363,34 @@ class Explorer(Node):
         self.shutdown = True
 
 
+# def main(args=None):
+#     rclpy.init(
+#         args=args,
+#         signal_handler_options=SignalHandlerOptions.NO,
+#     )
+#     node = Explorer()
+#     try:
+#         rclpy.spin(node)
+#     except KeyboardInterrupt:
+#         print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
+#     finally:
+#         node.on_shutdown()
+#         # while not node.shutdown:
+#         #     continue
+#         node.destroy_node()
+#         rclpy.shutdown()
+
+        
 def main(args=None):
-    rclpy.init(
-        args=args,
-        signal_handler_options=SignalHandlerOptions.NO,
-    )
+    rclpy.init(args=args)
     node = Explorer()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
+        print(f"{node.get_name()} received shutdown")
+        pass
     finally:
         node.on_shutdown()
-        # while not node.shutdown:
-        #     continue
         node.destroy_node()
         rclpy.shutdown()
 

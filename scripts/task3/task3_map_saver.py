@@ -2,7 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.signals import SignalHandlerOptions
+# from rclpy.signals import SignalHandlerOptions
 from nav2_msgs.srv import SaveMap
 import os
 
@@ -85,20 +85,33 @@ class MapSaverNode(Node):
         self.shutdown = True
 
 
+# def main(args=None):
+#     rclpy.init(
+#         args=args,
+#         signal_handler_options=SignalHandlerOptions.NO,
+#     )
+#     node = MapSaverNode()
+#     try:
+#         rclpy.spin(node)
+#     except KeyboardInterrupt:
+#         print(f"{node.get_name()} received shutdown")
+#     finally:
+#         node.on_shutdown()
+#         # while not node.shutdown:
+#         #     continue
+#         node.destroy_node()
+#         rclpy.shutdown()
+
 def main(args=None):
-    rclpy.init(
-        args=args,
-        signal_handler_options=SignalHandlerOptions.NO,
-    )
+    rclpy.init(args=args)
     node = MapSaverNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         print(f"{node.get_name()} received shutdown")
+        pass
     finally:
         node.on_shutdown()
-        # while not node.shutdown:
-        #     continue
         node.destroy_node()
         rclpy.shutdown()
 
