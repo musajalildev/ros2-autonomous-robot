@@ -24,7 +24,7 @@ def generate_launch_description():
                     'slam.launch.py'
                 ])
             ),
-            launch_arguments={'environment': 'real'}.items()
+            launch_arguments={'environment': 'sim'}.items()
         ),
 
         # Map saver server

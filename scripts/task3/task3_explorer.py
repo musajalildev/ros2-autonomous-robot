@@ -2,41 +2,38 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.signals import SignalHandlerOptions
+# from rclpy.signals import SignalHandlerOptions
 
 from geometry_msgs.msg import TwistStamped
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, OccupancyGrid
 from sensor_msgs.msg import LaserScan
 from com2009_team09_2026_modules.tb3_tools import quaternion_to_euler
 from com2009_team09_2026.msg import ObstacleInfo
 
 import numpy as np
 import random
-from math import floor, degrees
+from math import floor, degrees, atan2, pi, sqrt
 import time
 
-# LiDAR arc indices
-
 FRONT_ARC = list(range(0, 26)) + list(range(335, 360))
-LEFT_ARC = list(range(26, 91))
+LEFT_ARC  = list(range(26, 91))
 RIGHT_ARC = list(range(270, 335))
+BACK_ARC  = list(range(150, 211))
 
-MIN_VALID_RANGE = 0.12
+MIN_VALID_RANGE  = 0.12
+FORWARD_SPEED    = 0.26
+SLOW_SPEED       = 0.10
+TURN_SPEED       = 1.0
+BACKUP_SPEED     = -0.15
 
-# TUNABLE PARAMETERS
+FRONT_CLEAR      = 0.43
+FRONT_VERY_CLOSE = 0.30
+SIDE_CLOSE       = 0.18
+BACK_CLEAR       = 0.25
 
-FORWARD_SPEED = 0.23
-SLOW_SPEED = 0.06
-TURN_SPEED = 0.9
-RECOVER_TURN_SPEED = 1.2
-
-FRONT_CLEAR_THRESHOLD = 0.43
-FRONT_VERY_CLOSE_THRESHOLD = 0.30
-SIDE_CLOSE_THRESHOLD = 0.18
-
-ZONE_SIZE = 1.0
-
-TOTAL_TIME = 178.0  # stop robot (2s before 180)
+GOAL_REACHED     = 0.40
+GOAL_TIMEOUT     = 150
+TOTAL_TIME       = 180.0
 
 
 class Explorer(Node):
@@ -44,177 +41,169 @@ class Explorer(Node):
     def __init__(self):
         super().__init__("task3_explorer")
 
-        self.shutdown = False
-        self.have_odom = False
-        self.have_scan = False
+        self.shutdown   = False
+        self.have_odom  = False
+        self.have_scan  = False
+        self.have_map   = False
         self.start_time = None
+        self.vel_msg    = TwistStamped()
 
-        self.vel_msg = TwistStamped()
+        self.x = self.y = self.theta_z = 0.0
+        self.x0 = self.y0 = 0.0
 
-        # Odometry
-        self.x = 0.0
-        self.y = 0.0
-        self.theta_z = 0.0
+        self.map_data     = None
+        self.map_width    = self.map_height = 0
+        self.map_res      = 0.05
+        self.map_origin_x = self.map_origin_y = 0.0
 
-        # Start pose
-        self.x0 = 0.0
-        self.y0 = 0.0
+        self.goal_x       = None
+        self.goal_y       = None
+        self.goal_age     = 0
+        self.goal_blacklist = []  # blacklist timed-out goals
 
-        # Zone tracking
         self.visited_zones = set()
-        self.start_zone = None
 
-        # LiDAR distance
         self.front_distance = 999.0
-        self.left_distance = 999.0
+        self.left_distance  = 999.0
         self.right_distance = 999.0
+        self.back_distance  = 999.0
 
-        # Obstacle Info
-        self.obstacle_detected = False
-        self.object_type = "unkown"
-        self.have_obstacle_msg = False
+        self.prev_x = self.prev_y = 0.0
+        self.stuck_count   = 0
+        self.stuck_timer   = 0
 
-        # Progress tracking
-        self.prev_x = 0.0
-        self.prev_y = 0.0
-        self.progress_timer_count = 0
-        self.no_progress_count = 0
-
-        # State machine
-        self.state = "EXPLORE"
+        self.state           = "FIND_GOAL"
         self.blocked_counter = 0
-        self.last_turn_left = True
+        self.last_turn_left  = True
+        self.backup_counter  = 0
         self.recover_counter = 0
-        self.recover_direction = 1  # +1 = left, -1 = right
-        self.total_recoveries = 0   # track how many times we've recovered
+        self.recover_dir     = 1
+        self.recoveries      = 0
 
-        # Publishers
-        self.vel_pub = self.create_publisher(
-            msg_type=TwistStamped,
-            topic="cmd_vel",
-            qos_profile=10,
-        )
-
-        # Subscribers
+        self.vel_pub = self.create_publisher(TwistStamped, "cmd_vel", 10)
         self.odom_sub = self.create_subscription(
-            msg_type=Odometry,
-            topic="odom",
-            callback=self.odom_callback,
-            qos_profile=10,
-        )
+            Odometry, "odom", self.odom_callback, 10)
         self.scan_sub = self.create_subscription(
-            msg_type=LaserScan,
-            topic="scan",
-            callback=self.scan_callback,
-            qos_profile=10,
-        )
-        self.obstacle_sub = self.create_subscription(
-            msg_type=ObstacleInfo,
-            topic="/obstacle_info",
-            callback=self.obstacle_callback,
-            qos_profile=10,
-        )
+            LaserScan, "scan", self.scan_callback, 10)
+        self.map_sub = self.create_subscription(
+            OccupancyGrid, "/map", self.map_callback, 10)
 
-        # Timers
-        self.control_timer = self.create_timer(
-            timer_period_sec=0.1,  # 10 Hz
-            callback=self.timer_callback,
-        )
-        self.log_timer = self.create_timer(
-            timer_period_sec=1.0,  # 1 Hz
-            callback=self.log_callback,
-        )
+        self.control_timer = self.create_timer(0.1, self.timer_callback)
+        self.log_timer     = self.create_timer(2.0, self.log_callback)
+        self.get_logger().info("Task3: Frontier explorer with blacklist started.")
 
-        self.get_logger().info("Task 3: explorer node started.")
-
-    # HELPERS
-
-    def set_cmd(self, linear_x: float, angular_z: float):
-        self.vel_msg.twist.linear.x = linear_x
-        self.vel_msg.twist.angular.z = angular_z
+    def set_cmd(self, v, w):
+        self.vel_msg.twist.linear.x  = v
+        self.vel_msg.twist.angular.z = w
         self.vel_pub.publish(self.vel_msg)
 
     def filter_ranges(self, ranges, indices):
-        vals = []
-        n = len(ranges)
-        for i in indices:
-            if i >= n:
-                continue
-            r = ranges[i]
-            if r > MIN_VALID_RANGE and not np.isinf(r) and not np.isnan(r):
-                vals.append(r)
+        vals = [ranges[i] for i in indices
+                if i < len(ranges)
+                and ranges[i] > MIN_VALID_RANGE
+                and not np.isinf(ranges[i])
+                and not np.isnan(ranges[i])]
         return vals if vals else [float("inf")]
 
-    # ZONE TRACKING
-
-    def _current_zone(self):
-        rx = self.x - self.x0
-        ry = self.y - self.y0
-        return (floor(rx / ZONE_SIZE), floor(ry / ZONE_SIZE))
+    def _zone(self):
+        return (floor((self.x - self.x0)), floor((self.y - self.y0)))
 
     def _update_zones(self):
-        zone = self._current_zone()
-        if zone not in self.visited_zones:
-            self.visited_zones.add(zone)
-            self.get_logger().info(
-                f"ZONE ENTERED: {zone} - total visited: {len(self.visited_zones)}"
-            )
+        z = self._zone()
+        if z not in self.visited_zones:
+            self.visited_zones.add(z)
+            self.get_logger().info(f"ZONE {z} total={len(self.visited_zones)}")
 
-    # PROGRESS TRACKING
+    def _find_goal(self):
+        if self.map_data is None:
+            return False
 
-    def update_progress_check(self):
-        self.progress_timer_count += 1
+        grid = np.array(self.map_data, dtype=np.int8).reshape(
+            (self.map_height, self.map_width))
 
-        if self.progress_timer_count >= 10:
-            dx = self.x - self.prev_x
-            dy = self.y - self.prev_y
-            dist_moved = (dx**2 + dy**2) ** 0.5
+        rx = int((self.x - self.map_origin_x) / self.map_res)
+        ry = int((self.y - self.map_origin_y) / self.map_res)
 
-            if dist_moved < 0.03:
-                self.no_progress_count += 1
-            else:
-                self.no_progress_count = 0
+        frontiers = []
+        step = 3
+        for gy in range(step, self.map_height - step, step):
+            for gx in range(step, self.map_width - step, step):
+                if grid[gy, gx] != 0:
+                    continue
+                patch = grid[max(0,gy-1):gy+2, max(0,gx-1):gx+2]
+                if -1 not in patch:
+                    continue
+                dist = sqrt((gx-rx)**2 + (gy-ry)**2)
+                if dist < 4:  # ignore frontiers too close
+                    continue
 
-            self.prev_x = self.x
-            self.prev_y = self.y
-            self.progress_timer_count = 0
+                wx = gx * self.map_res + self.map_origin_x
+                wy = gy * self.map_res + self.map_origin_y
 
-    # SENSOR CALLBACKS
+                # Skip blacklisted locations
+                blacklisted = False
+                for bx, by in self.goal_blacklist:
+                    if sqrt((wx-bx)**2 + (wy-by)**2) < 0.5:
+                        blacklisted = True
+                        break
+                if blacklisted:
+                    continue
 
-    def odom_callback(self, msg: Odometry):
+                frontiers.append((dist, gx, gy, wx, wy))
+
+        if not frontiers:
+            # Clear blacklist and try again
+            self.goal_blacklist = []
+            self.get_logger().info("No frontiers — blacklist cleared")
+            return False
+
+        # Pick from farthest 30%
+        frontiers.sort(reverse=True)
+        pool = frontiers[:max(1, len(frontiers)//3)]
+        _, bx, by, wx, wy = random.choice(pool)
+
+        self.goal_x   = wx
+        self.goal_y   = wy
+        self.goal_age = 0
+        self.get_logger().info(
+            f"NEW GOAL: ({self.goal_x:.2f}, {self.goal_y:.2f}) "
+            f"blacklist={len(self.goal_blacklist)}")
+        return True
+
+    def odom_callback(self, msg):
         pose = msg.pose.pose
         _, _, yaw = quaternion_to_euler(pose.orientation)
-
-        self.x = pose.position.x
-        self.y = pose.position.y
-        self.theta_z = yaw
-
+        self.x, self.y, self.theta_z = pose.position.x, pose.position.y, yaw
         if not self.have_odom:
             self.have_odom = True
-            self.x0 = self.x
-            self.y0 = self.y
-            self.prev_x = self.x
-            self.prev_y = self.y
-            self.start_zone = self._current_zone()
-            self.visited_zones.add(self.start_zone)
-    
-    def obstacle_callback(self, msg: ObstacleInfo):
-        self.latest_obstacle = msg
-        self.have_obstacle_info = True
+            self.x0, self.y0 = self.x, self.y
+            self.prev_x, self.prev_y = self.x, self.y
+            self.visited_zones.add(self._zone())
 
-    def scan_callback(self, msg: LaserScan):
+    def scan_callback(self, msg):
         self.have_scan = True
-        ranges = msg.ranges
+        r = msg.ranges
+        self.front_distance = float(np.min(self.filter_ranges(r, FRONT_ARC)))
+        self.left_distance  = float(np.min(self.filter_ranges(r, LEFT_ARC)))
+        self.right_distance = float(np.min(self.filter_ranges(r, RIGHT_ARC)))
+        self.back_distance  = float(np.min(self.filter_ranges(r, BACK_ARC)))
 
-        front_vals = self.filter_ranges(ranges, FRONT_ARC)
-        left_vals = self.filter_ranges(ranges, LEFT_ARC)
-        right_vals = self.filter_ranges(ranges, RIGHT_ARC)
+    def map_callback(self, msg):
+        self.have_map     = True
+        self.map_data     = msg.data
+        self.map_width    = msg.info.width
+        self.map_height   = msg.info.height
+        self.map_res      = msg.info.resolution
+        self.map_origin_x = msg.info.origin.position.x
+        self.map_origin_y = msg.info.origin.position.y
 
-        self.front_distance = float(np.min(front_vals))
-        self.left_distance = float(np.min(left_vals))
-        self.right_distance = float(np.min(right_vals))
-
-    # MAIN CONTROL LOOP - 10 Hz
+    def _check_stuck(self):
+        self.stuck_timer += 1
+        if self.stuck_timer >= 15:
+            d = sqrt((self.x-self.prev_x)**2 + (self.y-self.prev_y)**2)
+            self.stuck_count = self.stuck_count + 1 if d < 0.03 else 0
+            self.prev_x, self.prev_y = self.x, self.y
+            self.stuck_timer = 0
 
     def timer_callback(self):
         if self.shutdown:
@@ -222,66 +211,46 @@ class Explorer(Node):
         if not self.have_scan or not self.have_odom:
             return
 
-        # Start clock
         if self.start_time is None:
             self.start_time = time.time()
 
-        elapsed = time.time() - self.start_time
-
-        # Time's up
-        if elapsed >= TOTAL_TIME:
+        if time.time() - self.start_time >= TOTAL_TIME:
             self.set_cmd(0.0, 0.0)
             return
 
-        # Update zone tracking
         self._update_zones()
 
-        # Progress check
-        if self.state != "RECOVER":
-            self.update_progress_check()
-
         front = self.front_distance
-        left = self.left_distance
+        left  = self.left_distance
         right = self.right_distance
+        back  = self.back_distance
 
-        self.last_turn_left = True if left >= right else False
+        self.last_turn_left = left >= right
 
-        # ── Recovery trigger ──
-        # Fires faster (>= 1 instead of >= 2) so we don't waste time
-        if self.state != "RECOVER" and self.no_progress_count >= 1:
-            self.state = "RECOVER"
-            self.total_recoveries += 1
+        # BACKUP
+        if self.state == "BACKUP":
+            self.set_cmd(BACKUP_SPEED, 0.0)
+            self.backup_counter -= 1
+            if self.backup_counter <= 0:
+                self.state           = "RECOVER"
+                self.recover_counter = 20 + random.randint(0, 15)
+                self.recover_dir     = 1 if left > right else -1
+                if self.recoveries % 2 == 0:
+                    self.recover_dir *= -1
+                self.recoveries += 1
+                self.stuck_count = 0
+                self.stuck_timer = 0
+                self.prev_x, self.prev_y = self.x, self.y
+            return
 
-            # Longer recovery turn: 2 seconds instead of 1.2
-            self.recover_counter = 20
-
-            # Pick recovery direction:
-            # - Usually turn toward open side
-            # - But every 3rd recovery, go the OTHER way to break loops
-            if self.total_recoveries % 3 == 0:
-                # Random direction to break repetitive patterns
-                self.recover_direction = random.choice([1, -1])
-                self.get_logger().info(
-                    f"RECOVER #{self.total_recoveries}: random direction"
-                )
-            else:
-                # Turn toward whichever side has more space
-                self.recover_direction = 1 if left > right else -1
-
-            self.no_progress_count = 0
-
-        # STATE: RECOVER
+        # RECOVER 
         if self.state == "RECOVER":
-            self.set_cmd(0.0, RECOVER_TURN_SPEED * self.recover_direction)
-
+            self.set_cmd(0.0, TURN_SPEED * self.recover_dir)
             self.recover_counter -= 1
             if self.recover_counter <= 0:
-                self.state = "EXPLORE"
-                self.blocked_counter = 0
-                self.no_progress_count = 0
-                self.progress_timer_count = 0
-                self.prev_x = self.x
-                self.prev_y = self.y
+                self.state  = "FIND_GOAL"
+                self.goal_x = None
+                self.goal_y = None
             return
         
         avoid_triggered = (
@@ -289,76 +258,116 @@ class Explorer(Node):
             else front < FRONT_CLEAR_THRESHOLD
         )
 
-        # STATE: AVOID
-        if avoid_triggered or front < FRONT_CLEAR_THRESHOLD:
-            self.state = "AVOID"
-            self.blocked_counter += 1
-
-            # Flip turn direction if stuck turning one way too long
-            if self.blocked_counter > 15:
-                self.last_turn_left = not self.last_turn_left
-                self.blocked_counter = 0
-
-            # Very close - turn in place
-            if front < FRONT_VERY_CLOSE_THRESHOLD:
-                if self.last_turn_left:
-                    self.set_cmd(0.0, TURN_SPEED)
-                else:
-                    self.set_cmd(0.0, -TURN_SPEED)
-                return
-
-            # Close but not critical - slow forward + turn
-            if self.last_turn_left:
-                self.set_cmd(SLOW_SPEED, TURN_SPEED)
+        #  Stuck check 
+        self._check_stuck()
+        if self.stuck_count >= 3:
+            if back > BACK_CLEAR:
+                self.state          = "BACKUP"
+                self.backup_counter = 15
             else:
-                self.set_cmd(SLOW_SPEED, -TURN_SPEED)
+                self.state           = "RECOVER"
+                self.recover_counter = 20 + random.randint(0, 20)
+                self.recover_dir     = random.choice([1, -1])
+                self.recoveries     += 1
+            self.stuck_count = 0
+            self.goal_x      = None
             return
 
-        # STATE: EXPLORE
-        self.state = "EXPLORE"
+        #  Goal timeout 
+        if self.goal_x is not None:
+            self.goal_age += 1
+            if self.goal_age > GOAL_TIMEOUT:
+                self.get_logger().info("Goal timed out — blacklisting")
+                self.goal_blacklist.append((self.goal_x, self.goal_y))
+                if len(self.goal_blacklist) > 20:
+                    self.goal_blacklist.pop(0)
+                self.goal_x = None
+                self.goal_y = None
+                self.state  = "FIND_GOAL"
+
+        # FIND_GOAL 
+        if self.state == "FIND_GOAL" or self.goal_x is None:
+            if self.have_map and self._find_goal():
+                self.state = "GOTO_GOAL"
+            else:
+                self.state = "WANDER"
+
+        # AVOID
+        if front < FRONT_CLEAR:
+            self.blocked_counter += 1
+            if self.blocked_counter > 20:
+                self.last_turn_left  = not self.last_turn_left
+                self.blocked_counter = 0
+
+            if front < FRONT_VERY_CLOSE:
+                self.set_cmd(0.0,
+                    TURN_SPEED if self.last_turn_left else -TURN_SPEED)
+            else:
+                self.set_cmd(SLOW_SPEED,
+                    TURN_SPEED if self.last_turn_left else -TURN_SPEED)
+            return
+
         self.blocked_counter = 0
 
-        angular_z = 0.0
+        # GOTO_GOAL 
+        if self.state == "GOTO_GOAL" and self.goal_x is not None:
+            dx   = self.goal_x - self.x
+            dy   = self.goal_y - self.y
+            dist = sqrt(dx**2 + dy**2)
 
-        # Push away from close side walls
-        if left < SIDE_CLOSE_THRESHOLD:
-            angular_z = -0.45
-        elif right < SIDE_CLOSE_THRESHOLD:
-            angular_z = 0.45
+            if dist < GOAL_REACHED:
+                self.get_logger().info("GOAL REACHED")
+                self.goal_x = None
+                self.goal_y = None
+                self.state  = "FIND_GOAL"
+                return
+
+            target = atan2(dy, dx)
+            err    = target - self.theta_z
+            while err > pi:  err -= 2*pi
+            while err < -pi: err += 2*pi
+
+            if left < SIDE_CLOSE:
+                self.set_cmd(SLOW_SPEED, -0.6)
+            elif right < SIDE_CLOSE:
+                self.set_cmd(SLOW_SPEED, 0.6)
+            elif abs(err) > 0.8:
+                w = max(min(1.5 * err, 1.2), -1.2)
+                self.set_cmd(FORWARD_SPEED, w)
+            else:
+                w = max(min(1.0 * err, 0.7), -0.7)
+                self.set_cmd(FORWARD_SPEED, w)
+            return
+
+        # WANDER 
+        if left < SIDE_CLOSE:
+            self.set_cmd(FORWARD_SPEED, -0.4)
+        elif right < SIDE_CLOSE:
+            self.set_cmd(FORWARD_SPEED, 0.4)
         else:
-            # Bias toward the more open side — slightly stronger than before
-            error = left - right
-            angular_z = max(min(0.45 * error, 0.35), -0.35)
+            w = max(min(0.4 * (left - right), 0.3), -0.3)
+            self.set_cmd(FORWARD_SPEED, w)
 
-        self.set_cmd(FORWARD_SPEED, angular_z)
-
-    # LOGGING
+        if random.random() < 0.05 and self.have_map:
+            self.state = "FIND_GOAL"
 
     def log_callback(self):
         if not self.have_scan or not self.have_odom:
             return
-
-        elapsed = 0.0
-        if self.start_time is not None:
-            elapsed = time.time() - self.start_time
-
-        zone = self._current_zone()
+        t = time.time() - self.start_time if self.start_time else 0.0
+        z = self._zone()
+        g = (f"({self.goal_x:.1f},{self.goal_y:.1f})"
+             if self.goal_x is not None else "None")
         self.get_logger().info(
-            f"time={elapsed:.0f}s | State={self.state} | "
-            f"zone={zone} | visited={len(self.visited_zones)} | "
-            f"x={self.x:.2f} y={self.y:.2f} yaw={degrees(self.theta_z):.1f} deg | "
-            f"Front={self.front_distance:.2f} Left={self.left_distance:.2f} "
-            f"Right={self.right_distance:.2f} | "
-            f"ObstDetected={self.obstacle_detected} Type={self.object_type}"
-            f"Blocked={self.blocked_counter} NoProgress={self.no_progress_count} "
-            f"Recoveries={self.total_recoveries}"
-        )
-
-    # SHUTDOWN
+            f"t={t:.0f}s | {self.state} | zone={z} "
+            f"vis={len(self.visited_zones)} | goal={g} age={self.goal_age} | "
+            f"F={self.front_distance:.2f} L={self.left_distance:.2f} "
+            f"R={self.right_distance:.2f} | rec={self.recoveries} "
+            f"stuck={self.stuck_count} bl={len(self.goal_blacklist)}")
 
     def on_shutdown(self):
-        self.get_logger().info("Explorer node shutting down - stopping robot.")
-        stop_msg = TwistStamped()
+        self.get_logger().info("Explorer shutting down.")
+        self.vel_pub.publish(TwistStamped())
         self.shutdown = True
         for _ in range(10):
             self.vel_pub.publish(stop_msg)
@@ -366,20 +375,34 @@ class Explorer(Node):
         
 
 
+# def main(args=None):
+#     rclpy.init(
+#         args=args,
+#         signal_handler_options=SignalHandlerOptions.NO,
+#     )
+#     node = Explorer()
+#     try:
+#         rclpy.spin(node)
+#     except KeyboardInterrupt:
+#         print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
+#     finally:
+#         node.on_shutdown()
+#         # while not node.shutdown:
+#         #     continue
+#         node.destroy_node()
+#         rclpy.shutdown()
+
+        
 def main(args=None):
-    rclpy.init(
-        args=args,
-        signal_handler_options=SignalHandlerOptions.NO,
-    )
+    rclpy.init(args=args)
     node = Explorer()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
+        print(f"{node.get_name()} received shutdown")
+        pass
     finally:
         node.on_shutdown()
-        # while not node.shutdown:
-        #     continue
         node.destroy_node()
         rclpy.shutdown()
 

@@ -2,7 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
-from rclpy.signals import SignalHandlerOptions
+# from rclpy.signals import SignalHandlerOptions
 
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
@@ -11,135 +11,187 @@ import numpy as np
 import os
 
 SNAP_PATH = os.path.expanduser(
-  '~/ros2_ws/src/com2009_team09_2026/snaps/target_beacon.jpg'
+    '~/ros2_ws/src/com2009_team09_2026/snaps/target_beacon.jpg'
 )
 
-# HSV colour ranges for each beacon colour
 COLOUR_RANGES = {
-  'yellow': ([20, 100, 100], [35, 255, 255]),
-  'green': ([36, 50, 50], [89, 255, 255]),
-  'blue': ([90, 50, 50], [128, 255, 255]),
-  'red': ([0, 120, 70], [10, 255, 255]),
+    'yellow': ([18,  60,  60], [38, 255, 255]),
+    'green':  ([36,  30,  30], [89, 255, 255]),
+    'blue':   ([85,  30,  30], [135, 255, 255]),
+    'red':    ([0,  100, 100], [10, 255, 255]),
 }
 
-# Minimum contour area in pixels to count as a real detection
-MIN_CONTOUR_AREA = 100
+RED_UPPER = ([165, 100, 100], [180, 255, 255])
+
+MIN_CONTOUR_AREA = 500
+LOCK_WIDTH_FRAC  = 0.25
+EDGE_MARGIN      = 10  # pixels from edge — beacon must not touch edges
+
 
 class BeaconSearch(Node):
 
-  def __init__(self):
-    super().__init__("task3_beacon")
+    def __init__(self):
+        super().__init__("task3_beacon")
 
-    self.shutdown = False
+        self.shutdown = False
 
-    self.declare_parameter('target_beacon', 'blue')
-    self.colour = (
-      self.get_parameter('target_beacon')
-      .get_parameter_value()
-      .string_value.lower()
-    )
-
-    # Required log message - must appear within 10 seconds
-    self.get_logger().info(f"TARGET BEACON: Searching for {self.colour}.")
-
-    self.bridge = CvBridge()
-    self.best_score = 0 # track best sighting for progressive saving
-    self.saved = False
-
-    # Ensure snaps directory exists
-    os.makedirs(os.path.dirname(SNAP_PATH), exist_ok=True)
-
-    self.image_sub = self.create_subscription(
-      Image,
-      'camera/image_raw',
-      self.image_callback,
-      10
-    )
-
-  def image_callback(self, msg: Image):
-    try:
-      cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-    except Exception:
-      return
-    
-    hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-
-    lo, hi = COLOUR_RANGES.get(self.colour, COLOUR_RANGES['blue'])
-    mask = cv2.inRange(
-      hsv,
-      np.array(lo, dtype=np.uint8),
-      np.array(hi, dtype=np.uint8),
-    )
-
-    # Red wraps around the HSV hue circle - add the upper red band
-    if self.colour == 'red':
-      mask2 = cv2.inRange(
-        hsv,
-        np.array([160, 120, 70], dtype=np.uint8),
-        np.array([180, 255, 255], dtype=np.uint8),
-      )
-      mask = cv2.bitwise_or(mask, mask2)
-
-    # Find contours
-    contours, _ = cv2.findContours(
-        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-    if not contours:
-        return
-
-    largest = max(contours, key=cv2.contourArea)
-    area = cv2.contourArea(largest)
-
-    if area < MIN_CONTOUR_AREA:
-      return
- 
-    # Score: area * height fraction
-    # Favours close-up views where the full beacon is visible (C3-C5 marks)
-    _, _, bbox_w, bbox_h = cv2.boundingRect(largest)
-    img_h = cv_image.shape[0]
-    height_frac = bbox_h / img_h
-    score = area * height_frac
-
-    # Only save if this is a BETTER view than what we already have
-    if score > self.best_score:
-      self.best_score = score
-      # Save the RAW image (no filtering applied)
-      cv2.imwrite(SNAP_PATH, cv_image)
-
-      if not self.saved:
-        self.saved = True
-        self.get_logger().info(
-            f"BEACON CAPTURED: {self.colour} beacon saved to {SNAP_PATH}"
-        )
-      else:
-        self.get_logger().info(
-            f"BEACON UPDATED: better image saved "
-            f"(score={score:.0f}, area={area:.0f}, h_frac={height_frac:.2f})"
+        self.declare_parameter('target_colour', 'blue')
+        self.colour = (
+            self.get_parameter('target_colour')
+            .get_parameter_value()
+            .string_value.lower()
         )
 
-  def on_shutdown(self):
-    if self.saved:
-      self.get_logger().info("Beacon node shutting down - image was saved.")
-    else:
-      self.get_logger().warn("Beacon node shutting down - NO beacon image was captured!")
-    self.shutdown = True
+        self.get_logger().info(f"TARGET BEACON: Searching for {self.colour}.")
+
+        self.bridge     = CvBridge()
+        self.best_score = 0.0
+        self.saved      = False
+        self.locked     = False
+
+        os.makedirs(os.path.dirname(SNAP_PATH), exist_ok=True)
+
+        self.image_sub = self.create_subscription(
+            Image,
+            'camera/color/image_raw',
+            self.image_callback,
+            10
+        )
+
+        self.get_logger().info(
+            f"Beacon search ready - looking for {self.colour} beacon.")
+
+    def _get_mask(self, hsv):
+        lo, hi = COLOUR_RANGES.get(self.colour, COLOUR_RANGES['blue'])
+        mask = cv2.inRange(
+            hsv,
+            np.array(lo, dtype=np.uint8),
+            np.array(hi, dtype=np.uint8),
+        )
+        if self.colour == 'red':
+            lo2, hi2 = RED_UPPER
+            mask2 = cv2.inRange(
+                hsv,
+                np.array(lo2, dtype=np.uint8),
+                np.array(hi2, dtype=np.uint8),
+            )
+            mask = cv2.bitwise_or(mask, mask2)
+        return mask
+
+    def image_callback(self, msg: Image):
+        if self.locked:
+            return
+
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        except Exception as e:
+            self.get_logger().warn(f"Image conversion failed: {e}")
+            return
+
+        img_h, img_w = cv_image.shape[:2]
+
+        hsv  = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+        mask = self._get_mask(hsv)
+
+        kernel = np.ones((5, 5), np.uint8)
+        mask   = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  kernel)
+        mask   = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return
+
+        largest = max(contours, key=cv2.contourArea)
+        area    = cv2.contourArea(largest)
+
+        if area < MIN_CONTOUR_AREA:
+            return
+
+        bx, by, bw, bh = cv2.boundingRect(largest)
+
+        width_frac  = bw / img_w
+        height_frac = bh / img_h
+
+        # Beacon must NOT touch any image edge
+        beacon_not_clipped = (
+            bx > EDGE_MARGIN and
+            by > EDGE_MARGIN and
+            (bx + bw) < img_w - EDGE_MARGIN and
+            (by + bh) < img_h - EDGE_MARGIN
+        )
+
+        if not beacon_not_clipped:
+            return
+
+        # Score: large area + good width + good height
+        score = area * width_frac * height_frac
+
+        if score > self.best_score:
+            self.best_score = score
+
+            cv2.imwrite(SNAP_PATH, cv_image)
+
+            if not self.saved:
+                self.saved = True
+                self.get_logger().info(
+                    f"BEACON CAPTURED: {self.colour} beacon saved! "
+                    f"area={area:.0f} w={width_frac:.2f} h={height_frac:.2f} "
+                    f"bx={bx} by={by} bw={bw} bh={bh}")
+            else:
+                self.get_logger().info(
+                    f"BEACON UPDATED: better view "
+                    f"(score={score:.0f} w={width_frac:.2f} h={height_frac:.2f})")
+
+            # Lock when beacon fills enough of the frame
+            if width_frac >= LOCK_WIDTH_FRAC:
+                self.locked = True
+                self.get_logger().info(
+                    f"BEACON LOCKED: full image captured "
+                    f"(w={width_frac:.2f}) — no more updates")
+
+    def on_shutdown(self):
+        if self.saved:
+            self.get_logger().info(
+                f"Beacon node shutdown - {self.colour} image saved.")
+        else:
+            self.get_logger().warn(
+                "Beacon node shutdown - NO beacon image captured!")
+        self.shutdown = True
+
+
+# def main(args=None):
+#     rclpy.init(
+#         args=args,
+#         signal_handler_options=SignalHandlerOptions.NO
+#     )
+#     node = BeaconSearch()
+#     try:
+#         rclpy.spin(node)
+#     except KeyboardInterrupt:
+#         print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
+#     except Exception as e:
+#         print(f"Exception: {e}")
+#     finally:
+#         node.on_shutdown()
+#         #while not node.shutdown:
+#         #    continue
+#         node.destroy_node()
+#         rclpy.shutdown()
 
 def main(args=None):
-  rclpy.init(
-    args=args,
-    signal_handler_options=SignalHandlerOptions.NO
-  )
-  node = BeaconSearch()
-  try:
-    rclpy.spin(node)
-  except KeyboardInterrupt:
-    print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
-  finally:
-    node.on_shutdown()
-    while not node.shutdown:
-      continue
-    node.destroy_node()
-    rclpy.shutdown()
+    rclpy.init(args=args)
+    node = BeaconSearch()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print(f"{node.get_name()} received shutdown")
+        pass
+    finally:
+        node.on_shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
+
 
 if __name__ == "__main__":
-  main()
+    main()
