@@ -99,7 +99,6 @@ class Explorer(Node):
         vals = [ranges[i] for i in indices
                 if i < len(ranges)
                 and ranges[i] > MIN_VALID_RANGE
-                and ranges[i] < 3.5
                 and not np.isinf(ranges[i])
                 and not np.isnan(ranges[i])]
         return vals if vals else [float("inf")]
@@ -133,7 +132,7 @@ class Explorer(Node):
                 if -1 not in patch:
                     continue
                 dist = sqrt((gx-rx)**2 + (gy-ry)**2)
-                if dist < 2:  # ignore frontiers too close
+                if dist < 4:  # ignore frontiers too close
                     continue
 
                 wx = gx * self.map_res + self.map_origin_x
@@ -157,8 +156,8 @@ class Explorer(Node):
             return False
 
         # Pick from farthest 30%
-        frontiers.sort()
-        pool = frontiers[:max(1, len(frontiers)//2)]
+        frontiers.sort(reverse=True)
+        pool = frontiers[:max(1, len(frontiers)//3)]
         _, bx, by, wx, wy = random.choice(pool)
 
         self.goal_x   = wx
@@ -200,7 +199,7 @@ class Explorer(Node):
         self.stuck_timer += 1
         if self.stuck_timer >= 15:
             d = sqrt((self.x-self.prev_x)**2 + (self.y-self.prev_y)**2)
-            self.stuck_count = self.stuck_count + 1 if d < 0.02 else 0
+            self.stuck_count = self.stuck_count + 1 if d < 0.03 else 0
             self.prev_x, self.prev_y = self.x, self.y
             self.stuck_timer = 0
 
@@ -255,7 +254,7 @@ class Explorer(Node):
 
         #  Stuck check 
         self._check_stuck()
-        if self.stuck_count >= 4:
+        if self.stuck_count >= 3:
             if back > BACK_CLEAR:
                 self.state          = "BACKUP"
                 self.backup_counter = 15
@@ -281,10 +280,8 @@ class Explorer(Node):
                 self.state  = "FIND_GOAL"
 
         # FIND_GOAL 
-        map_ready = self.have_map and self.start_time is not None and (time.time() - self.start_time > 3.0)
-
-        if self.state == "FIND_GOAL" or (self.state != "GOTO_GOAL" and self.goal_x is None):
-            if map_ready and self._find_goal():
+        if self.state == "FIND_GOAL" or self.goal_x is None:
+            if self.have_map and self._find_goal():
                 self.state = "GOTO_GOAL"
             else:
                 self.state = "WANDER"
