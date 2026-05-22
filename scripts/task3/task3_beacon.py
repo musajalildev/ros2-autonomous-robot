@@ -2,7 +2,6 @@
 
 import rclpy
 from rclpy.node import Node
-# from rclpy.signals import SignalHandlerOptions
 
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
@@ -160,25 +159,6 @@ class BeaconSearch(Node):
         self.shutdown = True
 
 
-# def main(args=None):
-#     rclpy.init(
-#         args=args,
-#         signal_handler_options=SignalHandlerOptions.NO
-#     )
-#     node = BeaconSearch()
-#     try:
-#         rclpy.spin(node)
-#     except KeyboardInterrupt:
-#         print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
-#     except Exception as e:
-#         print(f"Exception: {e}")
-#     finally:
-#         node.on_shutdown()
-#         #while not node.shutdown:
-#         #    continue
-#         node.destroy_node()
-#         rclpy.shutdown()
-
 def main(args=None):
     rclpy.init(args=args)
     node = BeaconSearch()
@@ -186,11 +166,11 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         print(f"{node.get_name()} received shutdown")
-        pass
     finally:
         node.on_shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

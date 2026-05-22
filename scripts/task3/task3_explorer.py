@@ -2,7 +2,6 @@
 
 import rclpy
 from rclpy.node import Node
-# from rclpy.signals import SignalHandlerOptions
 
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry, OccupancyGrid
@@ -21,14 +20,14 @@ RIGHT_ARC = list(range(270, 335))
 BACK_ARC  = list(range(150, 211))
 
 MIN_VALID_RANGE  = 0.12
-FORWARD_SPEED    = 0.26
+FORWARD_SPEED    = 0.18 # 0.26
 SLOW_SPEED       = 0.10
-TURN_SPEED       = 1.0
+TURN_SPEED       = 0.8 # 1.0
 BACKUP_SPEED     = -0.15
 
-FRONT_CLEAR      = 0.43
-FRONT_VERY_CLOSE = 0.30
-SIDE_CLOSE       = 0.18
+FRONT_CLEAR      = 0.50 # 0.43
+FRONT_VERY_CLOSE = 0.35 # 0.30
+SIDE_CLOSE       = 0.22 # 0.18
 BACK_CLEAR       = 0.25
 
 GOAL_REACHED     = 0.40
@@ -101,6 +100,7 @@ class Explorer(Node):
         vals = [ranges[i] for i in indices
                 if i < len(ranges)
                 and ranges[i] > MIN_VALID_RANGE
+                and ranges[i] < 3.5
                 and not np.isinf(ranges[i])
                 and not np.isnan(ranges[i])]
         return vals if vals else [float("inf")]
@@ -134,7 +134,7 @@ class Explorer(Node):
                 if -1 not in patch:
                     continue
                 dist = sqrt((gx-rx)**2 + (gy-ry)**2)
-                if dist < 4:  # ignore frontiers too close
+                if dist < 2:  # ignore frontiers too close
                     continue
 
                 wx = gx * self.map_res + self.map_origin_x
@@ -158,8 +158,8 @@ class Explorer(Node):
             return False
 
         # Pick from farthest 30%
-        frontiers.sort(reverse=True)
-        pool = frontiers[:max(1, len(frontiers)//3)]
+        frontiers.sort()
+        pool = frontiers[:max(1, len(frontiers)//2)]
         _, bx, by, wx, wy = random.choice(pool)
 
         self.goal_x   = wx
@@ -201,7 +201,7 @@ class Explorer(Node):
         self.stuck_timer += 1
         if self.stuck_timer >= 15:
             d = sqrt((self.x-self.prev_x)**2 + (self.y-self.prev_y)**2)
-            self.stuck_count = self.stuck_count + 1 if d < 0.03 else 0
+            self.stuck_count = self.stuck_count + 1 if d < 0.02 else 0
             self.prev_x, self.prev_y = self.x, self.y
             self.stuck_timer = 0
 
@@ -252,15 +252,10 @@ class Explorer(Node):
                 self.goal_x = None
                 self.goal_y = None
             return
-        
-        avoid_triggered = (
-            self.obstacle_detected if self.have_obstacle_msg
-            else front < FRONT_CLEAR_THRESHOLD
-        )
 
         #  Stuck check 
         self._check_stuck()
-        if self.stuck_count >= 3:
+        if self.stuck_count >= 4:
             if back > BACK_CLEAR:
                 self.state          = "BACKUP"
                 self.backup_counter = 15
@@ -286,8 +281,10 @@ class Explorer(Node):
                 self.state  = "FIND_GOAL"
 
         # FIND_GOAL 
-        if self.state == "FIND_GOAL" or self.goal_x is None:
-            if self.have_map and self._find_goal():
+        map_ready = self.have_map and self.start_time is not None and (time.time() - self.start_time > 3.0)
+
+        if self.state == "FIND_GOAL" or (self.state != "GOTO_GOAL" and self.goal_x is None):
+            if map_ready and self._find_goal():
                 self.state = "GOTO_GOAL"
             else:
                 self.state = "WANDER"
@@ -366,33 +363,15 @@ class Explorer(Node):
             f"stuck={self.stuck_count} bl={len(self.goal_blacklist)}")
 
     def on_shutdown(self):
-        self.get_logger().info("Explorer shutting down.")
-        self.vel_pub.publish(TwistStamped())
         self.shutdown = True
+        stop_msg = TwistStamped()
         for _ in range(10):
-            self.vel_pub.publish(stop_msg)
+            try:
+                self.vel_pub.publish(stop_msg)
+            except Exception:
+                break
             time.sleep(0.05)
-        
-
-
-# def main(args=None):
-#     rclpy.init(
-#         args=args,
-#         signal_handler_options=SignalHandlerOptions.NO,
-#     )
-#     node = Explorer()
-#     try:
-#         rclpy.spin(node)
-#     except KeyboardInterrupt:
-#         print(f"{node.get_name()} received a shutdown request (Ctrl+C).")
-#     finally:
-#         node.on_shutdown()
-#         # while not node.shutdown:
-#         #     continue
-#         node.destroy_node()
-#         rclpy.shutdown()
-
-        
+                
 def main(args=None):
     rclpy.init(args=args)
     node = Explorer()
@@ -400,11 +379,11 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         print(f"{node.get_name()} received shutdown")
-        pass
     finally:
         node.on_shutdown()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
