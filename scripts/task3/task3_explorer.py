@@ -7,7 +7,6 @@ from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry, OccupancyGrid
 from sensor_msgs.msg import LaserScan
 from com2009_team09_2026_modules.tb3_tools import quaternion_to_euler
-from com2009_team09_2026.msg import ObstacleInfo
 
 import numpy as np
 import random
@@ -20,8 +19,8 @@ RIGHT_ARC = list(range(270, 335))
 BACK_ARC  = list(range(150, 211))
 
 MIN_VALID_RANGE  = 0.12
-FORWARD_SPEED    = 0.18 # 0.26
-SLOW_SPEED       = 0.10
+FORWARD_SPEED    = 0.22 # 0.26
+SLOW_SPEED       = 0.12 # 0.10
 TURN_SPEED       = 0.8 # 1.0
 BACKUP_SPEED     = -0.15
 
@@ -208,6 +207,7 @@ class Explorer(Node):
     def timer_callback(self):
         if self.shutdown:
             return
+        
         if not self.have_scan or not self.have_odom:
             return
 

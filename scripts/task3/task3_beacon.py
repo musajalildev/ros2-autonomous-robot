@@ -26,7 +26,6 @@ MIN_CONTOUR_AREA = 500
 LOCK_WIDTH_FRAC  = 0.25
 EDGE_MARGIN      = 10  # pixels from edge — beacon must not touch edges
 
-
 class BeaconSearch(Node):
 
     def __init__(self):
