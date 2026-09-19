@@ -10,13 +10,13 @@ The project was developed as part of a team robotics project at the **University
 
 The robot autonomously explores an environment containing obstacles while searching for coloured beacons.
 
-▶️ [Watch the Task 3 autonomous robot demonstration](demo/task3-demo.mp4)
+▶️ [Watch the Task 3 autonomous robot demonstration](demo/team09_task3_2026.mp4)
 
 ### Robot Motion
 
 The initial task involved controlling the physical robot's movement while monitoring its position and orientation through ROS2.
 
-▶️ [Watch the Task 1 robot demonstration](demo/task1-demo.mp4)
+▶️ [Watch the Task 1 robot demonstration](demo/team09_task1_2026.mp4)
 
 ## Features
 
